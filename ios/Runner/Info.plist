@@ -8,6 +8,12 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>Exam Guard</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>ExamGuard requires Bluetooth access to scan for unauthorized wireless cheat devices in exam halls.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>ExamGuard requires Bluetooth access to scan for unauthorized wireless cheat devices in exam halls.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ExamGuard requires Location access to discover nearby BLE devices.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

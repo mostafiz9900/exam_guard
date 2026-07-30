@@ -1,12 +1,14 @@
 import 'package:go_router/go_router.dart';
 
-import '../../features/scanner/presentation/wireless_scanner_screen.dart';
-import '../../features/scanner/presentation/magnetic_scanner_screen.dart';
-import '../../features/radar/presentation/tracking_radar_screen.dart';
 import '../../features/action_log/presentation/action_entry_screen.dart';
-import '../../features/report/presentation/report_summary_screen.dart';
-import '../../features/session/presentation/session_setup_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
+import '../../features/radar/presentation/tracking_radar_screen.dart';
+import '../../features/report/presentation/report_summary_screen.dart';
+import '../../features/rf_detector/presentation/rf_detector_screen.dart';
+import '../../features/scanner/domain/scanned_device_model.dart';
+import '../../features/scanner/presentation/magnetic_scanner_screen.dart';
+import '../../features/scanner/presentation/wireless_scanner_screen.dart';
+import '../../features/session/presentation/session_setup_screen.dart';
 
 /// Central router for ExamGuard.
 ///
@@ -35,7 +37,11 @@ class AppRouter {
       GoRoute(
         path: AppRoute.radar,
         name: AppRoute.radarName,
-        builder: (context, state) => const TrackingRadarScreen(),
+        builder: (context, state) => TrackingRadarScreen(
+          targetDevice: state.extra is ScannedDeviceModel
+              ? state.extra as ScannedDeviceModel
+              : null,
+        ),
       ),
       GoRoute(
         path: AppRoute.magnetic,
@@ -50,7 +56,16 @@ class AppRouter {
       GoRoute(
         path: AppRoute.actionNew,
         name: AppRoute.actionNewName,
-        builder: (context, state) => const ActionEntryScreen(),
+        builder: (context, state) => ActionEntryScreen(
+          initialDevice: state.extra is ScannedDeviceModel
+              ? state.extra as ScannedDeviceModel
+              : null,
+        ),
+      ),
+      GoRoute(
+        path: AppRoute.rfDetector,
+        name: AppRoute.rfDetectorName,
+        builder: (context, state) => const RfDetectorScreen(),
       ),
     ],
   );
@@ -69,6 +84,8 @@ class AppRoute {
   static const String radarName = 'radar';
   static const String magnetic = '/magnetic';
   static const String magneticName = 'magnetic';
+  static const String rfDetector = '/rf-detector';
+  static const String rfDetectorName = 'rf_detector';
   static const String actionNew = '/action/new';
   static const String actionNewName = 'action_new';
   static const String report = '/report';
