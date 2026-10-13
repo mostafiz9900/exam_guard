@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(.claude/**)",
+      "Read(CLAUDE.md)",
+      "Read(lib/**)",
+      "Write(lib/**)",
+      "Write(.claude/tasks/**)",
+      "Write(.claude/memory/**)",
+      "Write(.claude/modules/**)",
+      "Write(.claude/commands/**)"
+    ],
+    "deny": [
+      "Write(~/**)",
+      "Write(../**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.env/**)"
+    ]
+  }
+}
