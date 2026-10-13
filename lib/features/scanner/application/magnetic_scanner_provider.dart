@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:math' as math;
+
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+
+import '../../../core/services/logger/app_logger.dart';
+import '../../../core/services/sensors/i_magnetometer_service.dart';
 
 enum MagneticHazardLevel {
   normal,
   elevated,
   critical,
-  cellCallDetected;
+  strongSource;
 
   String get label {
     switch (this) {
@@ -16,22 +19,22 @@ enum MagneticHazardLevel {
       case MagneticHazardLevel.elevated:
         return 'METAL / ANOMALY DETECTED';
       case MagneticHazardLevel.critical:
-        return 'HIGH EMP / ELECTRONIC HAZARD';
-      case MagneticHazardLevel.cellCallDetected:
-        return 'ACTIVE CALL / DATA TRANSMISSION!';
+        return 'STRONG MAGNETIC ANOMALY';
+      case MagneticHazardLevel.strongSource:
+        return 'VERY STRONG SOURCE — DEVICE AT CONTACT RANGE';
     }
   }
 
   String get suggestion {
     switch (this) {
       case MagneticHazardLevel.normal:
-        return 'No metallic or active electronic anomalies nearby.';
+        return 'No metallic or magnetic anomalies nearby.';
       case MagneticHazardLevel.elevated:
         return 'Suspected hidden metal / earpiece magnet. Check clothing pockets or seat.';
       case MagneticHazardLevel.critical:
-        return 'Critical electromagnetic field! Active smartphone, smartwatch or EMP device in immediate proximity.';
-      case MagneticHazardLevel.cellCallDetected:
-        return 'Active phone call or 4G/5G data stream detected! Inspect candidate desk immediately.';
+        return 'Strong field change. A phone, smartwatch or speaker magnet is likely very close.';
+      case MagneticHazardLevel.strongSource:
+        return 'Field is far above normal. An electronic device or magnet is touching the phone area — inspect now.';
     }
   }
 }
@@ -62,20 +65,22 @@ class MagneticScannerState {
   final String? errorMessage;
 
   const MagneticScannerState({
-    this.magnitude = 48.5,
-    this.x = 22.1,
-    this.y = -18.4,
-    this.z = 39.2,
-    this.baseline = 48.0,
-    this.peakValue = 48.5,
+    this.magnitude = 0,
+    this.x = 0,
+    this.y = 0,
+    this.z = 0,
+    this.baseline = 0,
+    this.peakValue = 0,
     this.isScanning = false,
     this.isHardwareSensorActive = false,
     this.isBuzzerEnabled = true,
     this.sensitivity = MagneticSensitivity.balanced,
-    this.history = const [48.0, 48.2, 48.5, 48.1, 48.6, 48.3, 48.5],
+    this.history = const [],
     this.hazardLevel = MagneticHazardLevel.normal,
     this.errorMessage,
   });
+
+  bool get hasReading => isHardwareSensorActive;
 
   MagneticScannerState copyWith({
     double? magnitude,
@@ -90,7 +95,7 @@ class MagneticScannerState {
     MagneticSensitivity? sensitivity,
     List<double>? history,
     MagneticHazardLevel? hazardLevel,
-    String? errorMessage,
+    String? Function()? errorMessage,
   }) {
     return MagneticScannerState(
       magnitude: magnitude ?? this.magnitude,
@@ -106,7 +111,7 @@ class MagneticScannerState {
       sensitivity: sensitivity ?? this.sensitivity,
       history: history ?? this.history,
       hazardLevel: hazardLevel ?? this.hazardLevel,
-      errorMessage: errorMessage ?? this.errorMessage,
+      errorMessage: errorMessage != null ? errorMessage() : this.errorMessage,
     );
   }
 
@@ -119,7 +124,7 @@ class MagneticScannerState {
     final limit = sensitivity.threshold;
 
     if (magnitude > 120.0 || delta > 60.0) {
-      return MagneticHazardLevel.cellCallDetected;
+      return MagneticHazardLevel.strongSource;
     } else if (delta > (limit - baseline + 30) || magnitude > 90.0) {
       return MagneticHazardLevel.critical;
     } else if (delta > (limit - baseline) || magnitude > limit) {
@@ -130,15 +135,30 @@ class MagneticScannerState {
   }
 }
 
-class MagneticScannerNotifier extends StateNotifier<MagneticScannerState> {
-  MagneticScannerNotifier() : super(const MagneticScannerState()) {
-    startScanning();
-  }
+/// Live magnetometer reader. Uses only the phone's real sensor.
+class MagneticScannerNotifier extends Notifier<MagneticScannerState> {
+  static const Duration _noSensorTimeout = Duration(seconds: 2);
+  static const int _historyLength = 16;
 
-  StreamSubscription<MagnetometerEvent>? _subscription;
-  Timer? _fallbackTimer;
-  Timer? _simulationTicker;
-  final math.Random _random = math.Random();
+  /// The sensor streams at ~50 Hz; publish to the UI at ~10 Hz.
+  static const Duration _uiInterval = Duration(milliseconds: 100);
+
+  late IMagnetometerService _sensor;
+  late AppLogger _logger;
+
+  StreamSubscription<MagnetometerReading>? _subscription;
+  Timer? _noSensorTimer;
+  DateTime _lastPublish = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _hasBaseline = false;
+
+  @override
+  MagneticScannerState build() {
+    _sensor = ref.watch(magnetometerServiceProvider);
+    _logger = ref.watch(appLoggerProvider);
+    ref.onDispose(_cancel);
+    Future.microtask(startScanning);
+    return const MagneticScannerState();
+  }
 
   void setSensitivity(MagneticSensitivity s) {
     final hazard = MagneticScannerState.calculateHazard(
@@ -151,126 +171,79 @@ class MagneticScannerNotifier extends StateNotifier<MagneticScannerState> {
   }
 
   void startScanning() {
-    stopScanning();
-    state = state.copyWith(isScanning: true, errorMessage: null);
+    _cancel();
+    if (!ref.mounted) return;
+    state = state.copyWith(isScanning: true, errorMessage: () => null);
 
-    bool receivedHardwareEvent = false;
-
-    try {
-      _subscription = magnetometerEventStream().listen(
-        (event) {
-          receivedHardwareEvent = true;
-          _fallbackTimer?.cancel();
-
-          final mag = math.sqrt(
-            (event.x * event.x) + (event.y * event.y) + (event.z * event.z),
-          );
-          final peak = math.max(state.peakValue, mag);
-          final hazard = MagneticScannerState.calculateHazard(
-            mag,
-            state.baseline,
-            state.sensitivity,
-          );
-
-          final newHist = List<double>.from(state.history)..add(mag);
-          if (newHist.length > 16) newHist.removeAt(0);
-
-          state = state.copyWith(
-            magnitude: double.parse(mag.toStringAsFixed(1)),
-            x: double.parse(event.x.toStringAsFixed(1)),
-            y: double.parse(event.y.toStringAsFixed(1)),
-            z: double.parse(event.z.toStringAsFixed(1)),
-            peakValue: double.parse(peak.toStringAsFixed(1)),
-            history: newHist,
-            hazardLevel: hazard,
-            isScanning: true,
-            isHardwareSensorActive: true,
-          );
-        },
-        onError: (Object error) {
-          _startSimulationFallback();
-        },
-      );
-    } catch (_) {
-      _startSimulationFallback();
-    }
-
-    _fallbackTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (!receivedHardwareEvent) {
-        _startSimulationFallback();
-      }
-    });
-  }
-
-  void _startSimulationFallback() {
-    if (_simulationTicker != null && _simulationTicker!.isActive) return;
-
-    state = state.copyWith(
-      isHardwareSensorActive: false,
-      isScanning: true,
+    _subscription = _sensor.readings().listen(
+      _onReading,
+      onError: (Object e, StackTrace st) {
+        _logger.warning('Magnetometer stream error', e, st);
+        _markUnavailable();
+      },
     );
 
-    _simulationTicker =
-        Timer.periodic(const Duration(milliseconds: 300), (_) {
-      final noiseX = 20.0 + (_random.nextDouble() * 6.0 - 3.0);
-      final noiseY = -18.0 + (_random.nextDouble() * 6.0 - 3.0);
-      final noiseZ = 38.0 + (_random.nextDouble() * 6.0 - 3.0);
-
-      final mag =
-          math.sqrt((noiseX * noiseX) + (noiseY * noiseY) + (noiseZ * noiseZ));
-      final peak = math.max(state.peakValue, mag);
-      final hazard = MagneticScannerState.calculateHazard(
-        mag,
-        state.baseline,
-        state.sensitivity,
-      );
-
-      final newHist = List<double>.from(state.history)..add(mag);
-      if (newHist.length > 16) newHist.removeAt(0);
-
-      state = state.copyWith(
-        magnitude: double.parse(mag.toStringAsFixed(1)),
-        x: double.parse(noiseX.toStringAsFixed(1)),
-        y: double.parse(noiseY.toStringAsFixed(1)),
-        z: double.parse(noiseZ.toStringAsFixed(1)),
-        peakValue: double.parse(peak.toStringAsFixed(1)),
-        history: newHist,
-        hazardLevel: hazard,
-      );
+    _noSensorTimer = Timer(_noSensorTimeout, () {
+      if (!state.isHardwareSensorActive) _markUnavailable();
     });
   }
 
-  /// Trigger simulated metal / electronic device anomaly for testing
-  void triggerSimulatedMetalAnomaly() {
-    final metalMag = 128.5 + _random.nextDouble() * 35.0;
-    final peak = math.max(state.peakValue, metalMag);
+  void _onReading(MagnetometerReading event) {
+    if (!ref.mounted) return;
+    _noSensorTimer?.cancel();
+
+    final now = DateTime.now();
+    if (state.isHardwareSensorActive &&
+        now.difference(_lastPublish) < _uiInterval) {
+      return;
+    }
+    _lastPublish = now;
+
+    final mag = math.sqrt(
+      (event.x * event.x) + (event.y * event.y) + (event.z * event.z),
+    );
+    final rounded = double.parse(mag.toStringAsFixed(1));
+
+    // The first real reading becomes the ambient baseline.
+    final baseline = _hasBaseline ? state.baseline : rounded;
+    _hasBaseline = true;
+
+    final peak = math.max(state.peakValue, rounded);
     final hazard = MagneticScannerState.calculateHazard(
-      metalMag,
-      state.baseline,
+      rounded,
+      baseline,
       state.sensitivity,
     );
 
-    final newHist = List<double>.from(state.history)..add(metalMag);
-    if (newHist.length > 16) newHist.removeAt(0);
+    final history = [...state.history, rounded];
+    if (history.length > _historyLength) history.removeAt(0);
 
     state = state.copyWith(
-      magnitude: double.parse(metalMag.toStringAsFixed(1)),
-      x: 75.2,
-      y: 62.1,
-      z: 88.4,
-      peakValue: double.parse(peak.toStringAsFixed(1)),
-      history: newHist,
+      magnitude: rounded,
+      x: double.parse(event.x.toStringAsFixed(1)),
+      y: double.parse(event.y.toStringAsFixed(1)),
+      z: double.parse(event.z.toStringAsFixed(1)),
+      baseline: baseline,
+      peakValue: peak,
+      history: history,
       hazardLevel: hazard,
+      isScanning: true,
+      isHardwareSensorActive: true,
+    );
+  }
+
+  void _markUnavailable() {
+    if (!ref.mounted) return;
+    _cancel();
+    state = state.copyWith(
+      isScanning: false,
+      isHardwareSensorActive: false,
+      errorMessage: () => 'This phone has no working magnetometer sensor.',
     );
   }
 
   void stopScanning() {
-    _subscription?.cancel();
-    _subscription = null;
-    _fallbackTimer?.cancel();
-    _fallbackTimer = null;
-    _simulationTicker?.cancel();
-    _simulationTicker = null;
+    _cancel();
     state = state.copyWith(isScanning: false);
   }
 
@@ -279,14 +252,15 @@ class MagneticScannerNotifier extends StateNotifier<MagneticScannerState> {
         state.copyWith(baseline: state.magnitude, peakValue: state.magnitude);
   }
 
-  @override
-  void dispose() {
-    stopScanning();
-    super.dispose();
+  void _cancel() {
+    _subscription?.cancel();
+    _subscription = null;
+    _noSensorTimer?.cancel();
+    _noSensorTimer = null;
   }
 }
 
 final magneticScannerProvider =
-    StateNotifierProvider<MagneticScannerNotifier, MagneticScannerState>(
-  (ref) => MagneticScannerNotifier(),
+    NotifierProvider<MagneticScannerNotifier, MagneticScannerState>(
+  MagneticScannerNotifier.new,
 );

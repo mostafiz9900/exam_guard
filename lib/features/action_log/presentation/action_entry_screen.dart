@@ -31,7 +31,7 @@ class ActionEntryScreen extends HookConsumerWidget {
     final selectedSeverity = useState('HIGH');
     final isSaving = useState(false);
 
-    final session = ref.watch(sessionProvider).valueOrNull;
+    final session = ref.watch(sessionProvider).value;
 
     void showExportReportModal() {
       final textReport = ViolationReportService.instance.generateTextReport(

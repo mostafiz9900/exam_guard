@@ -8,7 +8,12 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/widgets/app_settings_menu.dart';
 import '../../../core/widgets/primary_button.dart';
+import '../../../core/routing/app_router.dart';
+import '../../../core/services/logger/app_logger.dart';
+import '../../../core/services/report/session_report_pdf_service.dart';
+import '../../../core/services/share/i_share_service.dart';
 import '../../session/application/session_provider.dart';
+import '../../session/domain/session_model.dart';
 
 class ReportSummaryScreen extends ConsumerWidget {
   const ReportSummaryScreen({super.key});
@@ -29,11 +34,13 @@ class ReportSummaryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final session = ref.watch(sessionProvider).valueOrNull;
+    final session = ref.watch(sessionProvider).value;
     final logs = session?.deviceLogs ?? const [];
 
     final criticalCount = logs.where((l) => l['severity'] == 'CRITICAL').length;
     final highCount = logs.where((l) => l['severity'] == 'HIGH').length;
+    final hasViolations = criticalCount + highCount > 0;
+    final statusColor = hasViolations ? AppColors.error : AppColors.success;
 
     return Scaffold(
       appBar: AppBar(
@@ -41,15 +48,10 @@ class ReportSummaryScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.share_rounded),
-            tooltip: 'Export Report',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Audit report exported successfully'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
+            tooltip: 'Export PDF Report',
+            onPressed: session == null
+                ? null
+                : () => _exportPdf(context, ref, session),
           ),
           const AppSettingsMenu(),
         ],
@@ -85,7 +87,7 @@ class ReportSummaryScreen extends ConsumerWidget {
                               SizedBox(width: 8.w),
                               Expanded(
                                 child: Text(
-                                  session?.instituteName ?? 'Exam Hall Security',
+                                  session?.instituteName ?? 'No session',
                                   style: Theme.of(context)
                                       .textTheme
                                       .titleMedium
@@ -98,16 +100,16 @@ class ReportSummaryScreen extends ConsumerWidget {
                                   vertical: 4.h,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: AppColors.success.withValues(alpha: 0.15),
+                                  color: statusColor.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(12.r),
                                 ),
                                 child: Text(
-                                  'COMPLIANT',
+                                  hasViolations ? 'VIOLATIONS FOUND' : 'NO MAJOR VIOLATIONS',
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelSmall
                                       ?.copyWith(
-                                        color: AppColors.success,
+                                        color: statusColor,
                                         fontWeight: FontWeight.bold,
                                       ),
                                 ),
@@ -120,11 +122,11 @@ class ReportSummaryScreen extends ConsumerWidget {
                             children: [
                               _MetaInfo(
                                 label: 'Room Number',
-                                value: session?.roomNumber ?? 'Room 101',
+                                value: session?.roomNumber ?? '-',
                               ),
                               _MetaInfo(
                                 label: 'Inspector',
-                                value: session?.teacherName ?? 'Chief Invigilator',
+                                value: session?.teacherName ?? '-',
                               ),
                               _MetaInfo(
                                 label: 'Total Logs',
@@ -327,14 +329,61 @@ class ReportSummaryScreen extends ConsumerWidget {
                   SizedBox(height: AppDimens.spacingLarge),
 
                   PrimaryButton(
-                    label: 'Create New Incident Entry',
-                    onPressed: () => context.push('/action/new'),
+                    label: 'Export & Share PDF Report',
+                    onPressed: session == null
+                        ? null
+                        : () => _exportPdf(context, ref, session),
                   ),
+                  SizedBox(height: AppDimens.spacingMedium),
+                  if (session?.endTime == null)
+                    OutlinedButton.icon(
+                      onPressed: () => context.push(AppRoute.actionNew),
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Create New Incident Entry'),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: () => context.go(AppRoute.sessionSetup),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('Start New Exam Session'),
+                    ),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+Future<void> _exportPdf(
+  BuildContext context,
+  WidgetRef ref,
+  SessionModel session,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final bytes =
+        await ref.read(sessionReportPdfServiceProvider).build(session);
+    final date = session.startTime.toIso8601String().substring(0, 10);
+    final outcome = await ref.read(shareServiceProvider).shareFile(
+          bytes: bytes,
+          fileName: 'examguard_room_${session.roomNumber}_$date.pdf',
+          mimeType: 'application/pdf',
+          subject: 'ExamGuard report — Room ${session.roomNumber}',
+        );
+    if (outcome == ShareOutcome.unavailable) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Sharing is not available on this device')),
+      );
+    }
+  } catch (e, st) {
+    ref.read(appLoggerProvider).error('PDF export failed', e, st);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Could not export report: $e'),
+        backgroundColor: AppColors.error,
       ),
     );
   }

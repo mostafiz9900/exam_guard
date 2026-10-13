@@ -22,7 +22,7 @@ class MagneticScannerScreen extends ConsumerWidget {
         return const Color(0xFFF59E0B); // Yellow
       case MagneticHazardLevel.critical:
         return const Color(0xFFEF4444); // Red
-      case MagneticHazardLevel.cellCallDetected:
+      case MagneticHazardLevel.strongSource:
         return const Color(0xFFDC2626); // Alert Red
     }
   }
@@ -97,21 +97,27 @@ class MagneticScannerScreen extends ConsumerWidget {
                   Row(
                     children: [
                       Icon(
-                        state.isHardwareSensorActive
-                            ? Icons.sensors_rounded
-                            : Icons.tune_rounded,
+                        state.errorMessage != null
+                            ? Icons.sensors_off_rounded
+                            : Icons.sensors_rounded,
                         size: 16.w,
-                        color: Theme.of(context).colorScheme.primary,
+                        color: state.errorMessage != null
+                            ? Theme.of(context).colorScheme.error
+                            : Theme.of(context).colorScheme.primary,
                       ),
                       SizedBox(width: 6.w),
                       Text(
-                        state.isHardwareSensorActive
-                            ? 'MAGNETOMETER ONLINE'
-                            : 'SENSOR ENGINE ACTIVE',
+                        state.errorMessage != null
+                            ? 'SENSOR UNAVAILABLE'
+                            : (state.isHardwareSensorActive
+                                ? 'MAGNETOMETER LIVE'
+                                : 'WAITING FOR SENSOR…'),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.1,
-                          color: Theme.of(context).colorScheme.primary,
+                          color: state.errorMessage != null
+                              ? Theme.of(context).colorScheme.error
+                              : Theme.of(context).colorScheme.primary,
                         ),
                       ),
                       const Spacer(),
@@ -372,7 +378,7 @@ class MagneticScannerScreen extends ConsumerWidget {
                   ),
                   SizedBox(height: AppDimens.spacingLarge),
 
-                  // Action Buttons Row (Calibrate & Test Trigger)
+                  // Action Buttons Row (Calibrate)
                   Row(
                     children: [
                       Expanded(
@@ -390,24 +396,6 @@ class MagneticScannerScreen extends ConsumerWidget {
                           },
                           icon: const Icon(Icons.tune_rounded),
                           label: const Text('Calibrate Baseline'),
-                          style: OutlinedButton.styleFrom(
-                            padding: EdgeInsets.symmetric(vertical: 12.h),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(
-                                AppDimens.radiusMedium,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 10.w),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            notifier.triggerSimulatedMetalAnomaly();
-                          },
-                          icon: const Icon(Icons.flash_on_rounded),
-                          label: const Text('Simulate Metal Test'),
                           style: OutlinedButton.styleFrom(
                             padding: EdgeInsets.symmetric(vertical: 12.h),
                             shape: RoundedRectangleBorder(

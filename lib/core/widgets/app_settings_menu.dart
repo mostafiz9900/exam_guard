@@ -14,11 +14,11 @@ class AppSettingsMenu extends ConsumerWidget {
       onSelected: (action) {
         switch (action) {
           case _MenuAction.system:
-            ref.read(themeModeProvider.notifier).state = ThemeMode.system;
+            ref.read(themeModeProvider.notifier).setMode(ThemeMode.system);
           case _MenuAction.light:
-            ref.read(themeModeProvider.notifier).state = ThemeMode.light;
+            ref.read(themeModeProvider.notifier).setMode(ThemeMode.light);
           case _MenuAction.dark:
-            ref.read(themeModeProvider.notifier).state = ThemeMode.dark;
+            ref.read(themeModeProvider.notifier).setMode(ThemeMode.dark);
           case _MenuAction.english:
             context.setLocale(const Locale('en'));
           case _MenuAction.bangla:

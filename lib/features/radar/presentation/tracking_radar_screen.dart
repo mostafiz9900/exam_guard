@@ -11,7 +11,6 @@ import '../../../core/services/audio/geiger_buzzer_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/widgets/app_settings_menu.dart';
 import '../../../core/widgets/primary_button.dart';
-import '../../scanner/application/scanner_provider.dart';
 import '../../scanner/domain/scanned_device_model.dart';
 import '../application/tracking_radar_provider.dart';
 
@@ -67,20 +66,6 @@ class TrackingRadarScreen extends HookConsumerWidget {
       }
       return null;
     }, [targetDevice]);
-
-    // Stream live RSSI updates from scannerProvider if targetDevice matches
-    ref.listen(scannerProvider, (previous, next) {
-      final currentTarget = radarState.device ?? targetDevice;
-      if (currentTarget != null) {
-        final updated = next.devices.firstWhere(
-          (d) => d.id == currentTarget.id,
-          orElse: () => currentTarget,
-        );
-        if (updated.rssi != currentTarget.rssi) {
-          radarNotifier.updateDeviceSignal(updated.rssi, updated.lastSeen);
-        }
-      }
-    });
 
     // Drive Geiger Audio Beep loop based on distance
     useEffect(() {
@@ -199,7 +184,9 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      radarState.trend.label,
+                                      radarState.isSignalLost
+                                          ? 'SIGNAL LOST — NO ADVERTISEMENT FOR 5s'
+                                          : radarState.trend.label,
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
@@ -210,7 +197,9 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                           ),
                                     ),
                                     Text(
-                                      radarState.trend.instruction,
+                                      radarState.isSignalLost
+                                          ? 'Device stopped transmitting or moved out of range.'
+                                          : radarState.trend.instruction,
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall

@@ -1,195 +1,214 @@
 import 'dart:async';
-import 'dart:math' as math;
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../../core/services/audio/geiger_buzzer_service.dart';
+import '../../../core/services/bluetooth/i_bluetooth_service.dart';
+import '../../../core/services/permission/i_permission_service.dart';
 
 enum RfThreatLevel {
-  ambient('NORMAL AMBIENT (-85 to -70 dBm)', 'No cellular calls or heavy data traffic detected.'),
-  elevated('ELEVATED RF ACTIVITY (-69 to -50 dBm)', 'Background packet burst or standby cellular poll.'),
-  criticalCall('ACTIVE CELLULAR SIM CALL DETECTED! (-49 to -20 dBm)', 'High power RF transmitter active! Voice call in progress.'),
-  criticalData('4G / 5G DATA BURST TRANSMISSION! (-49 to -20 dBm)', 'Heavy cellular data packets transmission detected!');
+  quiet(
+    'QUIET (below -70 dBm)',
+    'No strong 2.4 GHz transmitter near the phone.',
+  ),
+  moderate(
+    'ACTIVE TRANSMITTER NEARBY (-70 to -50 dBm)',
+    'A Bluetooth transmitter is within a few metres. Sweep slowly to find it.',
+  ),
+  strong(
+    'STRONG TRANSMITTER VERY CLOSE (above -50 dBm)',
+    'A transmitting device is within about 1 metre. Inspect this desk.',
+  );
 
   const RfThreatLevel(this.label, this.suggestion);
   final String label;
   final String suggestion;
+
+  static RfThreatLevel fromDbm(double? dbm) {
+    if (dbm == null || dbm <= -70) return RfThreatLevel.quiet;
+    if (dbm <= -50) return RfThreatLevel.moderate;
+    return RfThreatLevel.strong;
+  }
 }
 
 class RfDetectorState {
-  final double currentDbm; // RF Signal strength in dBm (-90 to -20 dBm)
-  final double peakDbm;
+  /// Strongest 2.4 GHz signal received in the last window; null when silent.
+  final double? currentDbm;
+  final double? peakDbm;
+  final int packetsPerSecond;
+  final int activeTransmitters;
+  final String? strongestSourceName;
   final bool isScanning;
-  final bool isHardwareConnected;
+  final String? hardwareNodeName;
   final bool isBuzzerEnabled;
-  final String activeBand;
   final List<double> history;
   final RfThreatLevel threatLevel;
+  final String? errorMessage;
 
   const RfDetectorState({
-    this.currentDbm = -82.5,
-    this.peakDbm = -82.5,
-    this.isScanning = true,
-    this.isHardwareConnected = false,
+    this.currentDbm,
+    this.peakDbm,
+    this.packetsPerSecond = 0,
+    this.activeTransmitters = 0,
+    this.strongestSourceName,
+    this.isScanning = false,
+    this.hardwareNodeName,
     this.isBuzzerEnabled = true,
-    this.activeBand = '1800 MHz (Cellular)',
-    this.history = const [-85.0, -84.0, -82.5, -83.0, -81.5, -82.0, -82.5],
-    this.threatLevel = RfThreatLevel.ambient,
+    this.history = const [],
+    this.threatLevel = RfThreatLevel.quiet,
+    this.errorMessage,
   });
 
+  bool get isHardwareNodeNearby => hardwareNodeName != null;
+
   RfDetectorState copyWith({
-    double? currentDbm,
-    double? peakDbm,
+    double? Function()? currentDbm,
+    double? Function()? peakDbm,
+    int? packetsPerSecond,
+    int? activeTransmitters,
+    String? Function()? strongestSourceName,
     bool? isScanning,
-    bool? isHardwareConnected,
+    String? Function()? hardwareNodeName,
     bool? isBuzzerEnabled,
-    String? activeBand,
     List<double>? history,
     RfThreatLevel? threatLevel,
+    String? Function()? errorMessage,
   }) {
     return RfDetectorState(
-      currentDbm: currentDbm ?? this.currentDbm,
-      peakDbm: peakDbm ?? this.peakDbm,
+      currentDbm: currentDbm != null ? currentDbm() : this.currentDbm,
+      peakDbm: peakDbm != null ? peakDbm() : this.peakDbm,
+      packetsPerSecond: packetsPerSecond ?? this.packetsPerSecond,
+      activeTransmitters: activeTransmitters ?? this.activeTransmitters,
+      strongestSourceName: strongestSourceName != null
+          ? strongestSourceName()
+          : this.strongestSourceName,
       isScanning: isScanning ?? this.isScanning,
-      isHardwareConnected: isHardwareConnected ?? this.isHardwareConnected,
+      hardwareNodeName:
+          hardwareNodeName != null ? hardwareNodeName() : this.hardwareNodeName,
       isBuzzerEnabled: isBuzzerEnabled ?? this.isBuzzerEnabled,
-      activeBand: activeBand ?? this.activeBand,
       history: history ?? this.history,
       threatLevel: threatLevel ?? this.threatLevel,
+      errorMessage: errorMessage != null ? errorMessage() : this.errorMessage,
     );
-  }
-
-  static RfThreatLevel calculateThreat(double dbm, String band) {
-    if (dbm > -48.0) {
-      return band.contains('Data') || band.contains('5G')
-          ? RfThreatLevel.criticalData
-          : RfThreatLevel.criticalCall;
-    } else if (dbm > -68.0) {
-      return RfThreatLevel.elevated;
-    } else {
-      return RfThreatLevel.ambient;
-    }
   }
 }
 
-final rfDetectorProvider =
-    StateNotifierProvider<RfDetectorNotifier, RfDetectorState>((ref) {
-  return RfDetectorNotifier();
-});
+/// Live 2.4 GHz RF activity meter built from the phone's Bluetooth radio.
+class RfDetectorNotifier extends Notifier<RfDetectorState> {
+  static const String _scanOwner = 'rf_detector';
+  static const Duration _window = Duration(seconds: 2);
+  static const int _historyLength = 40;
+  static const List<String> _hardwareNodeKeywords = [
+    'examguard',
+    'esp32',
+    'rf-node',
+  ];
 
-class RfDetectorNotifier extends StateNotifier<RfDetectorState> {
-  RfDetectorNotifier() : super(const RfDetectorState()) {
-    startScanning();
-  }
+  late IBluetoothService _bluetooth;
+  late IPermissionService _permissions;
 
+  final List<BleScanRecord> _recent = [];
+  final Map<String, DateTime> _hardwareNodes = {};
+  StreamSubscription<BleScanRecord>? _sub;
   Timer? _ticker;
-  StreamSubscription<List<ScanResult>>? _bleScanSub;
-  final math.Random _random = math.Random();
 
-  void startScanning() {
-    state = state.copyWith(isScanning: true);
-    _attemptHardwareBleScan();
-    _startSimulationLoop();
+  @override
+  RfDetectorState build() {
+    _bluetooth = ref.watch(bluetoothServiceProvider);
+    _permissions = ref.watch(permissionServiceProvider);
+    ref.onDispose(_stop);
+    Future.microtask(startScanning);
+    return const RfDetectorState();
   }
 
-  void _attemptHardwareBleScan() async {
-    try {
-      if (await FlutterBluePlus.isSupported == false) return;
-      
-      // Look for ESP32-S3 AD8318 Hardware Node
-      _bleScanSub?.cancel();
-      _bleScanSub = FlutterBluePlus.scanResults.listen((results) {
-        for (final r in results) {
-          if (r.device.platformName.toLowerCase().contains('examguard') ||
-              r.device.platformName.toLowerCase().contains('esp32') ||
-              r.device.platformName.toLowerCase().contains('rf-node')) {
-            state = state.copyWith(isHardwareConnected: true);
-            break;
-          }
-        }
-      });
-
-      FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 5),
-        androidUsesFineLocation: true,
-      );
-    } catch (_) {
-      // Fallback silently to software simulation engine
-    }
-  }
-
-  void _startSimulationLoop() {
-    _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(milliseconds: 350), (_) {
-      if (!state.isScanning) return;
-
-      // Base room RF noise floor around -85.0 to -78.0 dBm
-      final noise = -82.0 + (_random.nextDouble() * 5.0 - 2.5);
-      final currentDbm = state.currentDbm;
-
-      // Decay back to ambient if decaying from a simulated burst
-      final nextDbm = currentDbm > -65.0
-          ? (currentDbm * 0.75 + noise * 0.25)
-          : noise;
-
-      final peak = math.max(state.peakDbm, nextDbm);
-      final threat = RfDetectorState.calculateThreat(nextDbm, state.activeBand);
-
-      final newHist = List<double>.from(state.history)..add(nextDbm);
-      if (newHist.length > 20) newHist.removeAt(0);
-
-      // Trigger Geiger Audio if critical burst
-      if (nextDbm > -48.0 && state.isBuzzerEnabled) {
-        GeigerBuzzerService.instance.updateTargetDistance(1.2);
-      } else {
-        GeigerBuzzerService.instance.stopBuzzer();
-      }
-
+  Future<void> startScanning() async {
+    final permission = await _permissions.requestBluetoothScan();
+    if (!ref.mounted) return;
+    if (permission != AppPermissionStatus.granted) {
       state = state.copyWith(
-        currentDbm: double.parse(nextDbm.toStringAsFixed(1)),
-        peakDbm: double.parse(peak.toStringAsFixed(1)),
-        history: newHist,
-        threatLevel: threat,
+        isScanning: false,
+        errorMessage: () => 'Bluetooth/Location permission is required.',
       );
-    });
-  }
+      return;
+    }
+    if (await _bluetooth.adapterStatus().first != BleAdapterStatus.on) {
+      if (!ref.mounted) return;
+      state = state.copyWith(
+        isScanning: false,
+        errorMessage: () => 'Bluetooth is OFF. Turn it on to measure RF.',
+      );
+      return;
+    }
+    if (!ref.mounted) return;
 
-  /// Simulates an active GSM / Cellular Voice Call transmission spike (-32.5 dBm)
-  void triggerSimulatedCallSpike() {
-    final spikeDbm = -32.5 + (_random.nextDouble() * 6.0);
-    final newHist = List<double>.from(state.history)..add(spikeDbm);
-    if (newHist.length > 20) newHist.removeAt(0);
-
-    state = state.copyWith(
-      currentDbm: double.parse(spikeDbm.toStringAsFixed(1)),
-      peakDbm: math.max(state.peakDbm, spikeDbm),
-      activeBand: '1800 MHz (GSM Voice Call)',
-      history: newHist,
-      threatLevel: RfThreatLevel.criticalCall,
-    );
-
-    if (state.isBuzzerEnabled) {
-      GeigerBuzzerService.instance.updateTargetDistance(0.8);
+    _sub?.cancel();
+    _sub = _bluetooth.scanRecords.listen(_onRecord);
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) => _tick());
+    await _bluetooth.startScan(_scanOwner);
+    if (ref.mounted) {
+      state = state.copyWith(isScanning: true, errorMessage: () => null);
     }
   }
 
-  /// Simulates 4G/5G High-Speed Data Packet Burst (-38.2 dBm)
-  void triggerSimulatedDataBurst() {
-    final burstDbm = -38.2 + (_random.nextDouble() * 5.0);
-    final newHist = List<double>.from(state.history)..add(burstDbm);
-    if (newHist.length > 20) newHist.removeAt(0);
+  void stopScanning() {
+    _stop();
+    state = state.copyWith(isScanning: false);
+  }
 
-    state = state.copyWith(
-      currentDbm: double.parse(burstDbm.toStringAsFixed(1)),
-      peakDbm: math.max(state.peakDbm, burstDbm),
-      activeBand: '3500 MHz (5G NR Data Burst)',
-      history: newHist,
-      threatLevel: RfThreatLevel.criticalData,
-    );
+  void _onRecord(BleScanRecord r) {
+    _recent.add(r);
+    final lower = r.name.toLowerCase();
+    if (_hardwareNodeKeywords.any(lower.contains)) {
+      _hardwareNodes[r.name] = r.timestamp;
+    }
+  }
 
-    if (state.isBuzzerEnabled) {
+  void _tick() {
+    if (!ref.mounted) return;
+    final now = DateTime.now();
+    _recent.removeWhere((r) => now.difference(r.timestamp) > _window);
+    _hardwareNodes.removeWhere((_, seen) => now.difference(seen) > _window * 5);
+
+    BleScanRecord? strongest;
+    final ids = <String>{};
+    var lastSecond = 0;
+    for (final r in _recent) {
+      ids.add(r.id);
+      if (now.difference(r.timestamp) <= const Duration(seconds: 1)) {
+        lastSecond++;
+      }
+      if (strongest == null || r.rssi > strongest.rssi) strongest = r;
+    }
+
+    final dbm = strongest?.rssi.toDouble();
+    final peak = dbm == null
+        ? state.peakDbm
+        : (state.peakDbm == null || dbm > state.peakDbm! ? dbm : state.peakDbm);
+    final threat = RfThreatLevel.fromDbm(dbm);
+
+    final history = [...state.history, dbm ?? -100.0];
+    if (history.length > _historyLength) history.removeAt(0);
+
+    if (state.isBuzzerEnabled && threat == RfThreatLevel.strong) {
       GeigerBuzzerService.instance.updateTargetDistance(1.0);
+    } else {
+      GeigerBuzzerService.instance.stopBuzzer();
     }
+
+    state = state.copyWith(
+      currentDbm: () => dbm,
+      peakDbm: () => peak,
+      packetsPerSecond: lastSecond,
+      activeTransmitters: ids.length,
+      strongestSourceName: () => strongest == null
+          ? null
+          : (strongest.name.isNotEmpty ? strongest.name : strongest.id),
+      hardwareNodeName: () =>
+          _hardwareNodes.isEmpty ? null : _hardwareNodes.keys.first,
+      history: history,
+      threatLevel: threat,
+    );
   }
 
   void toggleBuzzer() {
@@ -199,14 +218,21 @@ class RfDetectorNotifier extends StateNotifier<RfDetectorState> {
   }
 
   void resetPeak() {
-    state = state.copyWith(peakDbm: state.currentDbm);
+    state = state.copyWith(peakDbm: () => state.currentDbm);
   }
 
-  @override
-  void dispose() {
+  void _stop() {
     _ticker?.cancel();
-    _bleScanSub?.cancel();
+    _ticker = null;
+    _sub?.cancel();
+    _sub = null;
+    _recent.clear();
+    _bluetooth.stopScan(_scanOwner);
     GeigerBuzzerService.instance.stopBuzzer();
-    super.dispose();
   }
 }
+
+final rfDetectorProvider =
+    NotifierProvider.autoDispose<RfDetectorNotifier, RfDetectorState>(
+  RfDetectorNotifier.new,
+);

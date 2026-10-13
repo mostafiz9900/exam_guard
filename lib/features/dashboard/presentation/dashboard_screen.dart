@@ -9,6 +9,7 @@ import 'package:flutter_screenutil_plus/flutter_screenutil_plus.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/widgets/app_settings_menu.dart';
@@ -25,15 +26,15 @@ class DashboardScreen extends HookConsumerWidget {
     // Watch live state providers
     final scannerState = ref.watch(scannerProvider);
     final magneticState = ref.watch(magneticScannerProvider);
-    final session = ref.watch(sessionProvider).valueOrNull;
+    final session = ref.watch(sessionProvider).value;
 
     final room = session?.roomNumber.isNotEmpty == true
         ? 'Room ${session!.roomNumber}'
-        : 'Exam Hall 302';
+        : 'No active session';
 
     final institute = session?.instituteName.isNotEmpty == true
         ? session!.instituteName
-        : 'Exam Guard Central';
+        : '-';
 
     final colors = Theme.of(context).colorScheme;
 
@@ -129,6 +130,35 @@ class DashboardScreen extends HookConsumerWidget {
       return shouldExit ?? false;
     }
 
+    Future<void> endExam() async {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('End exam session?'),
+          content: const Text(
+            'The end time will be recorded and the session report will open.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('End Exam'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      await ref.read(sessionProvider.notifier).endCurrentSession();
+      if (context.mounted) context.go(AppRoute.report);
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -160,6 +190,15 @@ class DashboardScreen extends HookConsumerWidget {
               tooltip: scannerState.isScanning ? 'Scanner Active' : 'Scanner Idle',
               onPressed: () => context.push('/scanner'),
             ),
+            if (session != null && session.endTime == null)
+              TextButton.icon(
+                onPressed: endExam,
+                icon: const Icon(Icons.stop_circle_rounded, color: Colors.red),
+                label: const Text(
+                  'End Exam',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
             const AppSettingsMenu(),
           ],
         ),
@@ -410,14 +449,14 @@ class DashboardScreen extends HookConsumerWidget {
                               subtitle: 'Configure room boundary & parameters',
                               badgeText: room,
                               color: Colors.blueGrey,
-                              onTap: () => context.push('/session-setup'),
+                              onTap: () => context.go(AppRoute.sessionSetup),
                             ),
                             _DashboardModuleCard(
                               icon: Icons.settings_input_antenna_rounded,
-                              title: 'ESP32 Cellular RF Analyzer',
+                              title: 'Live RF Activity Meter',
                               subtitle:
-                                  'Wideband 8.0 GHz SIM call & 4G/5G data analyzer',
-                              badgeText: 'ESP32-S3',
+                                  'Live 2.4 GHz transmitter strength & ESP32 node',
+                              badgeText: '2.4 GHz',
                               color: Colors.deepOrange,
                               onTap: () => context.push('/rf-detector'),
                             ),

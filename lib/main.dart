@@ -8,7 +8,6 @@ import 'core/routing/app_router.dart';
 import 'core/settings/app_settings.dart';
 import 'core/theme/app_theme.dart';
 import 'core/widgets/status_toast.dart';
-import 'services/service_locator.dart';
 import 'package:exam_guard/core/services/local_storage/hive_storage_impl.dart';
 
 /// Entry point for ExamGuard application.
@@ -16,7 +15,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await EasyLocalization.ensureInitialized();
-  await setupServiceLocator();
 
   // Disable google_fonts runtime fetching to avoid network errors in restricted environments.
   GoogleFonts.config.allowRuntimeFetching = false;

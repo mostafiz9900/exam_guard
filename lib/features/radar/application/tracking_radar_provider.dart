@@ -1,5 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
+
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+import '../../../core/services/bluetooth/i_bluetooth_service.dart';
 import '../../scanner/domain/scanned_device_model.dart';
 
 enum ThreatLevel {
@@ -67,6 +71,9 @@ class RadarTargetState {
   final List<int> rssiHistory;
   final bool isAudioAlertEnabled;
 
+  /// True when the target has not advertised for [TrackingRadarNotifier.signalLostAfter].
+  final bool isSignalLost;
+
   const RadarTargetState({
     this.device,
     this.distanceMeters = 0.0,
@@ -75,6 +82,7 @@ class RadarTargetState {
     this.trend = ProximityTrend.stationary,
     this.rssiHistory = const [],
     this.isAudioAlertEnabled = true,
+    this.isSignalLost = false,
   });
 
   RadarTargetState copyWith({
@@ -85,6 +93,7 @@ class RadarTargetState {
     ProximityTrend? trend,
     List<int>? rssiHistory,
     bool? isAudioAlertEnabled,
+    bool? isSignalLost,
   }) {
     return RadarTargetState(
       device: device ?? this.device,
@@ -94,6 +103,7 @@ class RadarTargetState {
       trend: trend ?? this.trend,
       rssiHistory: rssiHistory ?? this.rssiHistory,
       isAudioAlertEnabled: isAudioAlertEnabled ?? this.isAudioAlertEnabled,
+      isSignalLost: isSignalLost ?? this.isSignalLost,
     );
   }
 
@@ -138,56 +148,86 @@ class RadarTargetState {
   }
 }
 
-class TrackingRadarNotifier extends StateNotifier<RadarTargetState> {
-  TrackingRadarNotifier() : super(const RadarTargetState());
+/// Live hot/cold tracking of one BLE device. Listens to every advertisement
+/// from the target, so distance and trend update in real time.
+class TrackingRadarNotifier extends Notifier<RadarTargetState> {
+  static const String _scanOwner = 'tracking_radar';
+  static const Duration signalLostAfter = Duration(seconds: 5);
+
+  late IBluetoothService _bluetooth;
+  StreamSubscription<BleScanRecord>? _sub;
+  Timer? _lostTimer;
+
+  @override
+  RadarTargetState build() {
+    _bluetooth = ref.watch(bluetoothServiceProvider);
+    ref.onDispose(_stop);
+    return const RadarTargetState();
+  }
 
   void setTargetDevice(ScannedDeviceModel device) {
-    final dist = RadarTargetState.calculateDistance(device.rssi);
-    final threat = RadarTargetState.calculateThreat(device.rssi);
-    final history = [device.rssi];
+    if (state.device?.id == device.id) return;
 
     state = state.copyWith(
       device: device,
-      distanceMeters: dist,
+      distanceMeters: RadarTargetState.calculateDistance(device.rssi),
       rssi: device.rssi,
-      threatLevel: threat,
+      threatLevel: RadarTargetState.calculateThreat(device.rssi),
       trend: ProximityTrend.stationary,
-      rssiHistory: history,
+      rssiHistory: [device.rssi],
+      isSignalLost: false,
     );
+
+    _sub?.cancel();
+    _sub = _bluetooth.scanRecords
+        .where((r) => r.id == device.id)
+        .listen((r) => updateDeviceSignal(r.rssi, r.timestamp));
+    _bluetooth.startScan(_scanOwner);
+
+    _lostTimer?.cancel();
+    _lostTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final target = state.device;
+      if (!ref.mounted || target == null) return;
+      final lost = DateTime.now().difference(target.lastSeen) > signalLostAfter;
+      if (lost != state.isSignalLost) {
+        state = state.copyWith(isSignalLost: lost);
+      }
+    });
   }
 
   void updateDeviceSignal(int rssi, [DateTime? timeStamp]) {
-    if (state.device == null) return;
+    if (!ref.mounted || state.device == null) return;
     final updatedDevice = state.device!.copyWith(
       rssi: rssi,
       lastSeen: timeStamp ?? DateTime.now(),
     );
-    final dist = RadarTargetState.calculateDistance(rssi);
-    final threat = RadarTargetState.calculateThreat(rssi);
 
-    final newHistory = List<int>.from(state.rssiHistory)..add(rssi);
-    if (newHistory.length > 20) {
-      newHistory.removeAt(0);
-    }
-
-    final trend = RadarTargetState.calculateTrend(rssi, newHistory);
+    final newHistory = [...state.rssiHistory, rssi];
+    if (newHistory.length > 20) newHistory.removeAt(0);
 
     state = state.copyWith(
       device: updatedDevice,
-      distanceMeters: dist,
+      distanceMeters: RadarTargetState.calculateDistance(rssi),
       rssi: rssi,
-      threatLevel: threat,
-      trend: trend,
+      threatLevel: RadarTargetState.calculateThreat(rssi),
+      trend: RadarTargetState.calculateTrend(rssi, newHistory),
       rssiHistory: newHistory,
+      isSignalLost: false,
     );
   }
 
   void toggleAudioAlert() {
     state = state.copyWith(isAudioAlertEnabled: !state.isAudioAlertEnabled);
   }
+
+  void _stop() {
+    _lostTimer?.cancel();
+    _sub?.cancel();
+    _bluetooth.stopScan(_scanOwner);
+  }
 }
 
 final trackingRadarProvider =
-    StateNotifierProvider<TrackingRadarNotifier, RadarTargetState>(
-  (ref) => TrackingRadarNotifier(),
+    NotifierProvider.autoDispose<TrackingRadarNotifier, RadarTargetState>(
+  TrackingRadarNotifier.new,
 );

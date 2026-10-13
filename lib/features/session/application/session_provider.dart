@@ -1,32 +1,23 @@
-import 'dart:async';
-
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:exam_guard/features/session/domain/session_model.dart';
+
 import 'package:exam_guard/core/services/local_storage/hive_storage_impl.dart';
 import 'package:exam_guard/core/services/local_storage/i_local_storage.dart';
+import 'package:exam_guard/features/session/domain/session_model.dart';
 
 /// Global provider for session state.
-/// The state holds the currently active session or null.
+/// The state holds the active session, the just-ended session (until a new
+/// one starts), or null.
 final sessionProvider = AsyncNotifierProvider<SessionNotifier, SessionModel?>(
   SessionNotifier.new,
 );
 
 class SessionNotifier extends AsyncNotifier<SessionModel?> {
-  late final ILocalStorage _storage;
-  Timer? _ticker;
+  late ILocalStorage _storage;
 
   @override
   Future<SessionModel?> build() async {
-    // Acquire storage from the provided dependency.
-    _storage = ref.read(localStorageProvider);
-    final current = await _storage.getCurrentSession();
-    // If a session exists, we could start an internal timer here to track
-    // elapsed time. Keep it lightweight for now.
-    // Ensure we stop the ticker when the provider is disposed.
-    ref.onDispose(() {
-      _stopTicker();
-    });
-    return current;
+    _storage = ref.watch(localStorageProvider);
+    return _storage.getCurrentSession();
   }
 
   /// Create and persist a new session. Generates a simple id if caller doesn't.
@@ -37,7 +28,7 @@ class SessionNotifier extends AsyncNotifier<SessionModel?> {
     required String roomNumber,
   }) async {
     state = const AsyncValue.loading();
-    try {
+    state = await AsyncValue.guard(() async {
       final session = SessionModel(
         id: id ?? DateTime.now().millisecondsSinceEpoch.toString(),
         instituteName: instituteName,
@@ -45,55 +36,34 @@ class SessionNotifier extends AsyncNotifier<SessionModel?> {
         roomNumber: roomNumber,
         startTime: DateTime.now(),
       );
-
       await _storage.saveSession(session);
-      // Optionally start a ticker if the UI needs periodic updates.
-      _startTicker();
-      state = AsyncValue.data(session);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
-      rethrow;
+      return session;
+    });
+    if (state case AsyncError(:final error, :final stackTrace)) {
+      Error.throwWithStackTrace(error, stackTrace);
     }
   }
 
-  Future<void> endCurrentSession() async {
+  /// Stamps the end time, persists it, and keeps the ended session in state
+  /// so the report screen can show and export it.
+  Future<SessionModel?> endCurrentSession() async {
     final current = state.value;
-    if (current == null) return;
-    state = const AsyncValue.loading();
-    try {
-      final ended = current.copyWith(endTime: DateTime.now());
-      await _storage.endSession(ended);
-      _stopTicker();
-      state = AsyncValue.data(ended);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
-      rethrow;
-    }
+    if (current == null || current.endTime != null) return current;
+    final ended = current.copyWith(endTime: DateTime.now());
+    await _storage.endSession(ended);
+    state = AsyncValue.data(ended);
+    return ended;
   }
 
   Future<void> addLog(Map<String, dynamic> log) async {
     final current = state.value;
     if (current == null) return;
     final updated = current.copyWith(deviceLogs: [...current.deviceLogs, log]);
-    await _storage.saveSession(updated);
+    if (current.endTime == null) {
+      await _storage.saveSession(updated);
+    } else {
+      await _storage.endSession(updated);
+    }
     state = AsyncValue.data(updated);
   }
-
-  void _startTicker() {
-    _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      // Trigger UI updates if necessary. We don't change the session model
-      // here, but notifying listeners can be done by reassigning the same
-      // value — avoid excessive updates in production.
-      state = AsyncValue.data(state.value);
-    });
-  }
-
-  void _stopTicker() {
-    _ticker?.cancel();
-    _ticker = null;
-  }
-
-  // cleanup is handled via `ref.onDispose` to avoid overriding internal
-  // notifier lifecycle hooks directly.
 }

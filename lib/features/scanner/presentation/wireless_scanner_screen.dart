@@ -284,10 +284,8 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                 ),
                                 child: Text(
                                   scannerState.isScanning
-                                      ? 'SCANNING • ${scannerState.secondsRemaining}s'
-                                      : (scannerState.isCoolingDown
-                                          ? 'NEXT SCAN IN • ${scannerState.secondsRemaining}s'
-                                          : 'PAUSED'),
+                                      ? 'LIVE • ${scannerState.activeDevices.length} DEVICES'
+                                      : 'PAUSED',
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelSmall
@@ -299,9 +297,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                             ? Theme.of(context)
                                                 .colorScheme
                                                 .primary
-                                            : (scannerState.isCoolingDown
-                                                ? Colors.amber.shade900
-                                                : Colors.grey.shade700),
+                                            : Colors.grey.shade700,
                                       ),
                                 ),
                               ),
@@ -811,8 +807,15 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                         },
                                         onInfoTap: () {
                                           _showDeviceDetailsModal(
-                                              context, device);
+                                            context,
+                                            device,
+                                            onConnect: () => scannerNotifier
+                                                .probeDeviceConnection(
+                                                    device.id),
+                                          );
                                         },
+                                        onDisconnectTap: () => scannerNotifier
+                                            .disconnectDevice(device.id),
                                       );
                                     },
                                   ),
@@ -829,7 +832,10 @@ class WirelessScannerScreen extends HookConsumerWidget {
 
   /// Displays detailed BLE payload & vendor inspector modal
   void _showDeviceDetailsModal(
-      BuildContext context, ScannedDeviceModel device) {
+    BuildContext context,
+    ScannedDeviceModel device, {
+    required VoidCallback onConnect,
+  }) {
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(
@@ -907,6 +913,22 @@ class WirelessScannerScreen extends HookConsumerWidget {
                   label: 'Service UUIDs',
                   value: device.serviceUuids.join(', '),
                 ),
+              if (device.isConnectable &&
+                  !device.isConnected &&
+                  !device.isConnecting) ...[
+                SizedBox(height: AppDimens.spacingMedium),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      onConnect();
+                    },
+                    icon: const Icon(Icons.link_rounded),
+                    label: const Text('Connect & Read Device Info'),
+                  ),
+                ),
+              ],
               SizedBox(height: AppDimens.spacingMedium),
             ],
           ),
@@ -1228,12 +1250,14 @@ class _ProfessionalDeviceCard extends StatelessWidget {
     required this.onTrackTap,
     required this.onLogTap,
     required this.onInfoTap,
+    required this.onDisconnectTap,
   });
 
   final ScannedDeviceModel device;
   final VoidCallback onTrackTap;
   final VoidCallback onLogTap;
   final VoidCallback onInfoTap;
+  final VoidCallback onDisconnectTap;
 
   Color _getSignalColor(int rssi) {
     if (rssi > -60) {
@@ -1509,7 +1533,7 @@ class _ProfessionalDeviceCard extends StatelessWidget {
                               size: 14.w, color: Colors.green.shade800),
                           SizedBox(width: 4.w),
                           Text(
-                            'CONNECTED (GATT PROBE ACTIVE)',
+                            'CONNECTED',
                             style: TextStyle(
                               fontSize: 10.sp,
                               fontWeight: FontWeight.bold,
@@ -1532,52 +1556,18 @@ class _ProfessionalDeviceCard extends StatelessWidget {
                         ],
                       ),
                       SizedBox(height: 6.h),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.amber.shade800,
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(vertical: 4.h),
-                              ),
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        'Acoustic Beep Triggered on ${device.displayName}!'),
-                                    backgroundColor: Colors.amber.shade900,
-                                  ),
-                                );
-                              },
-                              icon: Icon(Icons.volume_up_rounded, size: 13.w),
-                              label: Text('Beep Alert',
-                                  style: TextStyle(fontSize: 10.sp)),
-                            ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red.shade700,
+                            padding: EdgeInsets.symmetric(vertical: 4.h),
                           ),
-                          SizedBox(width: 4.w),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red.shade700,
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(vertical: 4.h),
-                              ),
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        'Call/Audio Stream Interrupted on ${device.displayName}!'),
-                                    backgroundColor: Colors.red.shade800,
-                                  ),
-                                );
-                              },
-                              icon: Icon(Icons.call_end_rounded, size: 13.w),
-                              label: Text('Interrupt Call',
-                                  style: TextStyle(fontSize: 10.sp)),
-                            ),
-                          ),
-                        ],
+                          onPressed: onDisconnectTap,
+                          icon: Icon(Icons.link_off_rounded, size: 13.w),
+                          label: Text('Disconnect',
+                              style: TextStyle(fontSize: 10.sp)),
+                        ),
                       ),
                     ],
                   ),

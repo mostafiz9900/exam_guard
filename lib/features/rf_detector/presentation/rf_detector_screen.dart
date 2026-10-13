@@ -14,14 +14,12 @@ class RfDetectorScreen extends ConsumerWidget {
 
   Color _getThreatColor(RfThreatLevel threat) {
     switch (threat) {
-      case RfThreatLevel.ambient:
+      case RfThreatLevel.quiet:
         return const Color(0xFF10B981); // Green
-      case RfThreatLevel.elevated:
+      case RfThreatLevel.moderate:
         return const Color(0xFFF59E0B); // Amber
-      case RfThreatLevel.criticalCall:
+      case RfThreatLevel.strong:
         return const Color(0xFFEF4444); // Red
-      case RfThreatLevel.criticalData:
-        return const Color(0xFFDC2626); // Dark Red
     }
   }
 
@@ -51,7 +49,7 @@ class RfDetectorScreen extends ConsumerWidget {
                     ),
                     SizedBox(width: 8.w),
                     Text(
-                      'ESP32 Cellular RF Operating Guide',
+                      'RF Activity Meter Guide',
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
@@ -63,25 +61,25 @@ class RfDetectorScreen extends ConsumerWidget {
 
                 _GuideStepTile(
                   stepNumber: '1',
-                  title: 'Wideband RF Spectrum Capture (1MHz - 8GHz)',
+                  title: 'What this meter measures',
                   description:
-                      'AD8318 sensor measures raw electromagnetic radio power in dBm. Detects GSM calls (900/1800MHz), 3G (2100MHz), 4G LTE (2300MHz) and 5G Sub-6GHz (3500MHz).',
+                      'Live 2.4 GHz Bluetooth transmissions received by this phone, in dBm. It shows the strongest nearby transmitter, packets per second and how many devices are transmitting. A phone cannot measure cellular (SIM) signals directly.',
                 ),
                 SizedBox(height: 12.h),
 
                 _GuideStepTile(
                   stepNumber: '2',
-                  title: 'Detecting Active SIM Voice Calls 📞',
+                  title: 'Finding a hidden transmitter 📍',
                   description:
-                      'When candidate makes or receives a phone call, RF power surges above -48 dBm. The app triggers RED alert and rapid Geiger beeping.',
+                      'Walk slowly between desks. Above -50 dBm the transmitter is within about 1 metre: the meter turns red and beeps.',
                 ),
                 SizedBox(height: 12.h),
 
                 _GuideStepTile(
                   stepNumber: '3',
-                  title: 'Detecting 4G/5G Cellular Data Packets 📶',
+                  title: 'ESP32 hardware node 📡',
                   description:
-                      'Active internet browsing or sending exam questions creates high-density packet bursts. Sweep phone near candidate desk to pinpoint source.',
+                      'If an ExamGuard ESP32 node is powered on nearby, its badge turns green. The node is detected by its Bluetooth name (examguard / esp32 / rf-node).',
                 ),
                 SizedBox(height: 16.h),
 
@@ -115,7 +113,7 @@ class RfDetectorScreen extends ConsumerWidget {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('ESP32 Cellular RF Analyzer'),
+          title: const Text('Live RF Activity Meter'),
           actions: [
             IconButton(
               icon: const Icon(Icons.help_outline_rounded),
@@ -182,7 +180,8 @@ class RfDetectorScreen extends ConsumerWidget {
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              'ESP32-S3 + AD8318 Module',
+                                              state.hardwareNodeName ??
+                                                  'Phone Bluetooth radio',
                                               style: TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13.sp,
@@ -198,7 +197,7 @@ class RfDetectorScreen extends ConsumerWidget {
                                               vertical: 3.h,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: (state.isHardwareConnected
+                                              color: (state.isHardwareNodeNearby
                                                       ? AppColors.success
                                                       : Colors.blue)
                                                   .withValues(alpha: 0.15),
@@ -206,13 +205,15 @@ class RfDetectorScreen extends ConsumerWidget {
                                                   BorderRadius.circular(8.r),
                                             ),
                                             child: Text(
-                                              state.isHardwareConnected
-                                                  ? 'HARDWARE BLE'
-                                                  : 'SIMULATOR ACTIVE',
+                                              state.isHardwareNodeNearby
+                                                  ? 'ESP32 NODE NEARBY'
+                                                  : (state.isScanning
+                                                      ? 'LIVE'
+                                                      : 'STOPPED'),
                                               style: TextStyle(
                                                 fontSize: 9.sp,
                                                 fontWeight: FontWeight.bold,
-                                                color: state.isHardwareConnected
+                                                color: state.isHardwareNodeNearby
                                                     ? AppColors.success
                                                     : Colors.blue,
                                               ),
@@ -222,7 +223,9 @@ class RfDetectorScreen extends ConsumerWidget {
                                       ),
                                       SizedBox(height: 2.h),
                                       Text(
-                                        '1 MHz – 8.0 GHz Wideband RF Detector • ${state.activeBand}',
+                                        state.errorMessage ??
+                                            '${state.activeTransmitters} transmitters • ${state.packetsPerSecond} packets/s'
+                                                '${state.strongestSourceName != null ? ' • strongest: ${state.strongestSourceName}' : ''}',
                                         style: TextStyle(
                                           fontSize: 10.sp,
                                           color: Colors.grey.shade600,
@@ -262,7 +265,7 @@ class RfDetectorScreen extends ConsumerWidget {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                '${state.currentDbm}',
+                                state.currentDbm?.toStringAsFixed(0) ?? '--',
                                 style: TextStyle(
                                   fontSize: 34.sp,
                                   fontWeight: FontWeight.bold,
@@ -271,7 +274,7 @@ class RfDetectorScreen extends ConsumerWidget {
                                 ),
                               ),
                               Text(
-                                'dBm RF POWER',
+                                'dBm STRONGEST SIGNAL',
                                 style: TextStyle(
                                   fontSize: 10.sp,
                                   fontWeight: FontWeight.bold,
@@ -290,7 +293,7 @@ class RfDetectorScreen extends ConsumerWidget {
                                   borderRadius: BorderRadius.circular(10.r),
                                 ),
                                 child: Text(
-                                  'Peak: ${state.peakDbm} dBm',
+                                  'Peak: ${state.peakDbm?.toStringAsFixed(0) ?? '--'} dBm',
                                   style: TextStyle(
                                     fontSize: 10.sp,
                                     fontWeight: FontWeight.bold,
@@ -360,7 +363,7 @@ class RfDetectorScreen extends ConsumerWidget {
                                       MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
-                                      'RF Spectrum Waveform (-90 to -20 dBm)',
+                                      '2.4 GHz Signal History (-100 to -20 dBm)',
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 11.sp,
@@ -393,58 +396,10 @@ class RfDetectorScreen extends ConsumerWidget {
                         ),
                         SizedBox(height: AppDimens.spacingLarge),
 
-                        // Hardware Testing Deck Buttons (For simulation & verification)
-                        Text(
-                          'Hardware Test & Simulation Deck',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12.sp,
-                          ),
-                        ),
-                        SizedBox(height: 6.h),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                  foregroundColor: Colors.white,
-                                  padding: EdgeInsets.symmetric(vertical: 10.h),
-                                ),
-                                onPressed: () =>
-                                    notifier.triggerSimulatedCallSpike(),
-                                icon: Icon(Icons.call_rounded, size: 16.w),
-                                label: Text(
-                                  'Test SIM Call Spike',
-                                  style: TextStyle(fontSize: 10.sp),
-                                ),
-                              ),
-                            ),
-                            SizedBox(width: 8.w),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.indigo,
-                                  foregroundColor: Colors.white,
-                                  padding: EdgeInsets.symmetric(vertical: 10.h),
-                                ),
-                                onPressed: () =>
-                                    notifier.triggerSimulatedDataBurst(),
-                                icon: Icon(Icons.wifi_tethering_rounded,
-                                    size: 16.w),
-                                label: Text(
-                                  'Test 5G Data Burst',
-                                  style: TextStyle(fontSize: 10.sp),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 8.h),
                         OutlinedButton.icon(
                           onPressed: () => notifier.resetPeak(),
                           icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Reset Peak RF Level'),
+                          label: const Text('Reset Peak'),
                         ),
                         SizedBox(height: AppDimens.spacingLarge),
 
@@ -532,7 +487,7 @@ class _RfWavePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (history.isEmpty) return;
+    if (history.length < 2) return;
 
     final paint = Paint()
       ..color = color
@@ -544,8 +499,8 @@ class _RfWavePainter extends CustomPainter {
     final stepX = size.width / (history.length - 1);
 
     for (int i = 0; i < history.length; i++) {
-      final dbm = history[i].clamp(-90.0, -20.0);
-      final norm = (dbm - (-90.0)) / 70.0; // 0.0 to 1.0
+      final dbm = history[i].clamp(-100.0, -20.0);
+      final norm = (dbm - (-100.0)) / 80.0; // 0.0 to 1.0
       final y = size.height - (norm * size.height);
       final x = i * stepX;
 

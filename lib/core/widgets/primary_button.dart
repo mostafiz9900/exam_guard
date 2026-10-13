@@ -18,7 +18,7 @@ class PrimaryButton extends StatelessWidget {
   });
 
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final double? height;
   final bool isLoading;
   final Color? backgroundColor;

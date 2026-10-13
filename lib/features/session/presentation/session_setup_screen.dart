@@ -119,7 +119,7 @@ class SessionSetupScreen extends HookConsumerWidget {
               child: Center(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: EdgeInsets.all(AppDimens.spacingLarge ?? 24),
+                  padding: EdgeInsets.all(AppDimens.spacingLarge),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 500),
                     child: Column(

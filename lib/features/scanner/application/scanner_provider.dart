@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:math' as math;
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:permission_handler/permission_handler.dart';
 
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+import '../../../core/services/bluetooth/i_bluetooth_service.dart';
+import '../../../core/services/logger/app_logger.dart';
+import '../../../core/services/permission/i_permission_service.dart';
 import '../domain/bluetooth_device_inspector.dart';
 import '../domain/scanned_device_model.dart';
 
@@ -19,8 +20,6 @@ enum RoomSizePreset {
 
 class ScannerState {
   final bool isScanning;
-  final bool isCoolingDown;
-  final int secondsRemaining;
   final List<ScannedDeviceModel> devices;
   final bool isRoomBoundaryMode;
   final RoomSizePreset roomSizePreset;
@@ -29,8 +28,6 @@ class ScannerState {
 
   const ScannerState({
     this.isScanning = false,
-    this.isCoolingDown = false,
-    this.secondsRemaining = 10,
     this.devices = const [],
     this.isRoomBoundaryMode = false,
     this.roomSizePreset = RoomSizePreset.medium,
@@ -51,8 +48,6 @@ class ScannerState {
 
   ScannerState copyWith({
     bool? isScanning,
-    bool? isCoolingDown,
-    int? secondsRemaining,
     List<ScannedDeviceModel>? devices,
     bool? isRoomBoundaryMode,
     RoomSizePreset? roomSizePreset,
@@ -62,8 +57,6 @@ class ScannerState {
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
-      isCoolingDown: isCoolingDown ?? this.isCoolingDown,
-      secondsRemaining: secondsRemaining ?? this.secondsRemaining,
       devices: devices ?? this.devices,
       isRoomBoundaryMode: isRoomBoundaryMode ?? this.isRoomBoundaryMode,
       roomSizePreset: roomSizePreset ?? this.roomSizePreset,
@@ -73,47 +66,47 @@ class ScannerState {
   }
 }
 
+/// Live BLE device discovery. Scans continuously while active; every
+/// advertisement updates the list immediately.
 class ScannerNotifier extends Notifier<ScannerState> {
-  StreamSubscription<List<ScanResult>>? _scanSubscription;
-  StreamSubscription<bool>? _isScanningSubscription;
-  StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
-  Timer? _cycleTimer;
-  Timer? _simulationFallbackTimer;
-  bool _hasRealDevices = false;
-  final Set<String> _autoProbedIds = {};
-  final math.Random _random = math.Random();
+  static const String _scanOwner = 'wireless_scanner';
 
-  final List<String> _mockIds = const [
-    'AA:BB:CC:11:22:33',
-    '44:55:66:77:88:99',
-    '24:DC:C3:A1:B2:C3',
-    '77:88:99:AA:BB:CC',
-    '99:88:77:66:55:44',
-  ];
+  /// A device that has not advertised for this long is removed.
+  static const Duration _goneAfter = Duration(seconds: 30);
+
+  late IBluetoothService _bluetooth;
+  late IPermissionService _permissions;
+  late AppLogger _logger;
+
+  StreamSubscription<BleScanRecord>? _recordsSub;
+  StreamSubscription<BleAdapterStatus>? _adapterSub;
+  Timer? _evictTimer;
 
   @override
   ScannerState build() {
-    ref.onDispose(() {
-      _stopSubscriptions();
-    });
+    _bluetooth = ref.watch(bluetoothServiceProvider);
+    _permissions = ref.watch(permissionServiceProvider);
+    _logger = ref.watch(appLoggerProvider);
 
-    _monitorAdapterState();
+    ref.onDispose(_stop);
+
+    _adapterSub = _bluetooth.adapterStatus().listen(_onAdapterStatus);
     Future.microtask(() => toggleScanning(true));
     return const ScannerState();
   }
 
-  void _monitorAdapterState() {
-    try {
-      _adapterStateSub?.cancel();
-      _adapterStateSub = FlutterBluePlus.adapterState.listen((adapterState) {
-        final isOff = adapterState != BluetoothAdapterState.on;
-        state = state.copyWith(isBluetoothOff: isOff);
-        if (isOff) {
-          _stopSubscriptions();
-          state = state.copyWith(isScanning: false, isCoolingDown: false);
-        }
-      });
-    } catch (_) {}
+  void _onAdapterStatus(BleAdapterStatus status) {
+    if (!ref.mounted) return;
+    final isOff = status != BleAdapterStatus.on;
+    if (isOff == state.isBluetoothOff) return;
+    state = state.copyWith(isBluetoothOff: isOff);
+    if (isOff && state.isScanning) {
+      _stop(keepAdapterListener: true);
+      state = state.copyWith(isScanning: false);
+    } else if (!isOff) {
+      // Bluetooth came back on: resume live scanning automatically.
+      toggleScanning(true);
+    }
   }
 
   void toggleRoomBoundaryMode([bool? enabled]) {
@@ -125,179 +118,101 @@ class ScannerNotifier extends Notifier<ScannerState> {
     state = state.copyWith(roomSizePreset: preset);
   }
 
-  /// Timed 15-second active scan phase + 30-second cooldown interval cycle
-  void _startTimedScanCycle() {
-    _cycleTimer?.cancel();
+  Future<void> toggleScanning([bool? enable]) async {
+    final shouldScan = enable ?? !state.isScanning;
+    if (!shouldScan) {
+      _stop(keepAdapterListener: true);
+      state = state.copyWith(isScanning: false);
+      return;
+    }
 
-    int remaining = 15;
-    state = state.copyWith(secondsRemaining: remaining, isCoolingDown: false);
+    if (!await checkPermissions()) {
+      if (ref.mounted) state = state.copyWith(isScanning: false);
+      return;
+    }
+    if (!ref.mounted) return;
 
-    _cycleTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!state.isScanning && !state.isCoolingDown) {
-        timer.cancel();
-        return;
-      }
-
-      if (!state.isCoolingDown) {
-        // Active 15-second Scan Phase
-        remaining--;
-        if (remaining <= 0) {
-          // Switch to 30-second Cooldown / Interval Phase
-          try {
-            await FlutterBluePlus.stopScan();
-          } catch (_) {}
-          state = state.copyWith(
-            isScanning: false,
-            isCoolingDown: true,
-            secondsRemaining: 30,
-          );
-          remaining = 30;
-        } else {
-          state = state.copyWith(secondsRemaining: remaining);
-        }
-      } else {
-        // 30-second Cooldown / Waiting Phase
-        remaining--;
-        if (remaining <= 0) {
-          // Restart Active 15-second Scan Phase
-          remaining = 15;
-          state = state.copyWith(
-            isScanning: true,
-            isCoolingDown: false,
-            secondsRemaining: 15,
-          );
-          _restartBleScan();
-        } else {
-          state = state.copyWith(secondsRemaining: remaining);
-        }
-      }
+    _recordsSub?.cancel();
+    _recordsSub = _bluetooth.scanRecords.listen(_onRecord);
+    _evictTimer?.cancel();
+    _evictTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _evictStaleDevices();
     });
-  }
 
-  void _restartBleScan() {
-    _evictStaleDevices();
-    try {
-      FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 10),
-        continuousUpdates: true,
-        androidUsesFineLocation: true,
-      );
-    } catch (_) {}
+    await _bluetooth.startScan(_scanOwner);
+    if (ref.mounted) {
+      state = state.copyWith(isScanning: true, clearError: true);
+    }
   }
 
   void _evictStaleDevices() {
     final now = DateTime.now();
-    final fresh = state.devices.where((d) {
-      return d.isConnected || now.difference(d.lastSeen).inSeconds < 45;
-    }).toList();
+    final fresh = state.devices
+        .where((d) => d.isConnected || now.difference(d.lastSeen) < _goneAfter)
+        .toList();
     if (fresh.length != state.devices.length) {
       state = state.copyWith(devices: fresh);
     }
   }
 
-  /// Probes GATT connection for a target device and enables mitigation options
+  /// Connects to a device on the inspector's request and reads what it exposes.
   Future<void> probeDeviceConnection(String deviceId) async {
-    final index = state.devices.indexWhere((d) => d.id == deviceId);
-    if (index == -1) return;
+    final target = _find(deviceId);
+    if (target == null || target.isConnected || target.isConnecting) return;
 
-    final target = state.devices[index];
-    if (target.isConnected || target.isConnecting) return;
-
-    _autoProbedIds.add(deviceId);
-
-    // Update state to connecting
-    final updatedDevices = List<ScannedDeviceModel>.from(state.devices);
-    updatedDevices[index] = target.copyWith(isConnecting: true);
-    state = state.copyWith(devices: updatedDevices);
-
+    _replace(deviceId, (d) => d.copyWith(isConnecting: true));
     try {
-      final bleDevice = BluetoothDevice.fromId(target.id);
-      await bleDevice.connect(
-        timeout: const Duration(seconds: 4),
-        autoConnect: false,
-        license: License.nonprofit,
+      final info = await _bluetooth.connect(deviceId);
+      if (!ref.mounted) return;
+      _replace(
+        deviceId,
+        (d) => d.copyWith(
+          isConnected: true,
+          isConnecting: false,
+          batteryLevel: info.batteryLevel,
+          fullGattName: info.gattName,
+        ),
       );
-
-      int? battery;
-      try {
-        final services = await bleDevice.discoverServices();
-        for (final s in services) {
-          if (s.uuid.toString().toUpperCase().contains('180F')) {
-            for (final c in s.characteristics) {
-              if (c.properties.read) {
-                final val = await c.read();
-                if (val.isNotEmpty) battery = val.first;
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
-      // Update state to connected
-      final connectedList = List<ScannedDeviceModel>.from(state.devices);
-      final curIdx = connectedList.indexWhere((d) => d.id == deviceId);
-      if (curIdx != -1) {
-        connectedList[curIdx] = connectedList[curIdx].copyWith(
-          isConnected: true,
-          isConnecting: false,
-          batteryLevel: battery ?? 88,
-          fullGattName: target.name.isNotEmpty && target.name != 'Unknown Device'
-              ? target.name
-              : '${target.manufacturer} Target',
-        );
-        state = state.copyWith(devices: connectedList);
-      }
-    } catch (_) {
-      // Mark connected for simulation/fallback target
-      final fallbackList = List<ScannedDeviceModel>.from(state.devices);
-      final curIdx = fallbackList.indexWhere((d) => d.id == deviceId);
-      if (curIdx != -1) {
-        fallbackList[curIdx] = fallbackList[curIdx].copyWith(
-          isConnected: true,
-          isConnecting: false,
-          batteryLevel: 92,
-          fullGattName: target.name,
-        );
-        state = state.copyWith(devices: fallbackList);
-      }
+    } catch (e, st) {
+      _logger.warning('Connect failed for $deviceId', e, st);
+      if (!ref.mounted) return;
+      _replace(deviceId, (d) => d.copyWith(isConnecting: false));
+      state = state.copyWith(
+        errorMessage: 'Could not connect to ${target.displayName}',
+      );
     }
   }
 
-  /// Disconnects GATT connection for target device
   Future<void> disconnectDevice(String deviceId) async {
     try {
-      final bleDevice = BluetoothDevice.fromId(deviceId);
-      await bleDevice.disconnect();
-    } catch (_) {}
-
-    final updated = List<ScannedDeviceModel>.from(state.devices);
-    final idx = updated.indexWhere((d) => d.id == deviceId);
-    if (idx != -1) {
-      updated[idx] = updated[idx].copyWith(
-        isConnected: false,
-        isConnecting: false,
-      );
-      state = state.copyWith(devices: updated);
+      await _bluetooth.disconnect(deviceId);
+    } catch (e, st) {
+      _logger.warning('Disconnect failed for $deviceId', e, st);
     }
+    if (!ref.mounted) return;
+    _replace(
+      deviceId,
+      (d) => d.copyWith(isConnected: false, isConnecting: false),
+    );
   }
 
   Future<void> enableBluetooth() async {
     try {
-      await FlutterBluePlus.turnOn();
-      await Future.delayed(const Duration(milliseconds: 600));
-      final permitted = await checkPermissions();
-      if (permitted) {
-        toggleScanning(true);
+      await _bluetooth.turnOn();
+      await toggleScanning(true);
+    } catch (e, st) {
+      _logger.warning('Turning Bluetooth on failed', e, st);
+      if (ref.mounted) {
+        state = state.copyWith(
+          errorMessage: 'Please turn on Bluetooth from system settings.',
+        );
       }
-    } catch (e) {
-      await checkPermissions();
     }
   }
 
   Future<bool> checkPermissions() async {
     try {
-      final isSupported = await FlutterBluePlus.isSupported;
-      if (!isSupported) {
+      if (!await _bluetooth.isSupported()) {
         state = state.copyWith(
           errorMessage: 'Bluetooth hardware is not supported on this device',
           isBluetoothOff: true,
@@ -305,8 +220,27 @@ class ScannerNotifier extends Notifier<ScannerState> {
         return false;
       }
 
-      var adapterState = await FlutterBluePlus.adapterState.first;
-      if (adapterState != BluetoothAdapterState.on) {
+      final permission = await _permissions.requestBluetoothScan();
+      if (!ref.mounted) return false;
+      switch (permission) {
+        case AppPermissionStatus.permanentlyDenied:
+          state = state.copyWith(
+            errorMessage:
+                'Bluetooth/Location permission permanently denied. Please enable in Settings.',
+          );
+          return false;
+        case AppPermissionStatus.denied:
+          state = state.copyWith(
+            errorMessage: 'Bluetooth/Location permission is required to scan.',
+          );
+          return false;
+        case AppPermissionStatus.granted:
+          break;
+      }
+
+      final adapter = await _bluetooth.adapterStatus().first;
+      if (!ref.mounted) return false;
+      if (adapter != BleAdapterStatus.on) {
         state = state.copyWith(
           isBluetoothOff: true,
           errorMessage: 'Bluetooth is OFF. Please turn ON Bluetooth to scan.',
@@ -314,286 +248,94 @@ class ScannerNotifier extends Notifier<ScannerState> {
         return false;
       }
 
-      final statuses = await [
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.locationWhenInUse,
-      ].request();
-
-      final scanStatus = statuses[Permission.bluetoothScan];
-      final locationStatus = statuses[Permission.locationWhenInUse];
-
-      if (scanStatus?.isPermanentlyDenied == true ||
-          locationStatus?.isPermanentlyDenied == true) {
-        state = state.copyWith(
-          errorMessage:
-              'Bluetooth/Location permission permanently denied. Please enable in Settings.',
-        );
-        return false;
-      }
-
       state = state.copyWith(isBluetoothOff: false, clearError: true);
       return true;
-    } catch (_) {
-      return true;
+    } catch (e, st) {
+      _logger.error('Bluetooth permission check failed', e, st);
+      if (ref.mounted) {
+        state = state.copyWith(errorMessage: 'Bluetooth check failed: $e');
+      }
+      return false;
     }
   }
 
-  Future<void> toggleScanning([bool? enable]) async {
-    final shouldScan = enable ?? (!state.isScanning && !state.isCoolingDown);
-
-    if (shouldScan) {
-      final permitted = await checkPermissions();
-      if (!permitted && state.isBluetoothOff) {
-        state = state.copyWith(isScanning: false, isCoolingDown: false);
-        return;
-      }
-
-      _scanSubscription?.cancel();
-      _scanSubscription = FlutterBluePlus.onScanResults.listen(
-        (results) {
-          for (final result in results) {
-            _onDeviceFound(result);
-          }
-        },
-        onError: (_) {},
-      );
-
-      _isScanningSubscription?.cancel();
-      _isScanningSubscription = FlutterBluePlus.isScanning.listen((scanning) {
-        if (!state.isCoolingDown) {
-          state = state.copyWith(isScanning: scanning);
-        }
-      });
-
-      _startTimedScanCycle();
-      _ensureRealisticLiveDevices();
-
-      try {
-        state = state.copyWith(isScanning: true, isCoolingDown: false, clearError: true);
-        await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 10),
-          continuousUpdates: true,
-          androidUsesFineLocation: true,
-        );
-      } catch (_) {
-        state = state.copyWith(isScanning: true);
-      }
-    } else {
-      _stopSubscriptions();
-      try {
-        await FlutterBluePlus.stopScan();
-      } catch (_) {}
-      state = state.copyWith(isScanning: false, isCoolingDown: false);
-    }
-  }
-
-  /// Populate realistic fallback devices ONLY if 0 real devices detected
-  void _ensureRealisticLiveDevices() {
-    _simulationFallbackTimer?.cancel();
-    _simulationFallbackTimer =
-        Timer.periodic(const Duration(milliseconds: 1000), (_) {
-      if (!state.isScanning || _hasRealDevices) return;
-
-      final now = DateTime.now();
-      final mockDevices = [
-        ScannedDeviceModel(
-          id: 'AA:BB:CC:11:22:33',
-          name: 'AirPods Pro (2nd Gen)',
-          manufacturer: 'Apple Inc.',
-          deviceType: 'Smart Earpiece / Audio',
-          rssi: -58 + (_random.nextInt(6) - 3),
-          txPower: -12,
-          isConnectable: true,
-          serviceUuids: const ['180A', 'FE9F'],
-          lastSeen: now,
-          firstSeen: now.subtract(const Duration(seconds: 10)),
-        ),
-        ScannedDeviceModel(
-          id: '44:55:66:77:88:99',
-          name: 'Galaxy-S24 Portable Hotspot',
-          manufacturer: 'Samsung Electronics',
-          deviceType: 'Wi-Fi Hotspot / Mobile AP',
-          rssi: -62 + (_random.nextInt(6) - 3),
-          txPower: -10,
-          isConnectable: true,
-          serviceUuids: const ['180F'],
-          lastSeen: now,
-          firstSeen: now.subtract(const Duration(seconds: 8)),
-        ),
-        ScannedDeviceModel(
-          id: '24:DC:C3:A1:B2:C3',
-          name: 'ESP32 Secret RF Bug',
-          manufacturer: 'Espressif Inc.',
-          deviceType: 'Covert Microcontroller / ESP32',
-          rssi: -54 + (_random.nextInt(6) - 3),
-          txPower: -8,
-          isConnectable: true,
-          serviceUuids: const ['FFE0'],
-          lastSeen: now,
-          firstSeen: now.subtract(const Duration(seconds: 6)),
-        ),
-        ScannedDeviceModel(
-          id: '77:88:99:AA:BB:CC',
-          name: 'Galaxy Watch 6',
-          manufacturer: 'Samsung Electronics',
-          deviceType: 'Smartwatch / Wearable',
-          rssi: -68 + (_random.nextInt(6) - 3),
-          txPower: -15,
-          isConnectable: true,
-          serviceUuids: const ['180D'],
-          lastSeen: now,
-          firstSeen: now.subtract(const Duration(seconds: 4)),
-        ),
-        ScannedDeviceModel(
-          id: '99:88:77:66:55:44',
-          name: 'iPhone 15 Pro',
-          manufacturer: 'Apple Inc.',
-          deviceType: 'Smartphone / Mobile',
-          rssi: -71 + (_random.nextInt(6) - 3),
-          txPower: -14,
-          isConnectable: true,
-          serviceUuids: const ['1805'],
-          lastSeen: now,
-          firstSeen: now.subtract(const Duration(seconds: 2)),
-        ),
-      ];
-
-      final deviceMap = <String, ScannedDeviceModel>{};
-      for (final d in state.devices) {
-        deviceMap[d.id.trim().toUpperCase()] = d;
-      }
-
-      for (final mock in mockDevices) {
-        if (!deviceMap.containsKey(mock.id)) {
-          deviceMap[mock.id] = mock;
-        } else {
-          final existing = deviceMap[mock.id]!;
-          deviceMap[mock.id] = existing.copyWith(
-            rssi: ((0.4 * mock.rssi) + (0.6 * existing.rssi)).round(),
-            lastSeen: now,
-          );
-        }
-      }
-
-      final sorted = deviceMap.values.toList()
-        ..sort((a, b) => b.firstSeen.compareTo(a.firstSeen));
-
-      state = state.copyWith(devices: sorted);
-    });
-  }
-
-  /// Updates device list with Smart Name Inference, EMA signal smoothing & Auto GATT connection probe.
-  void _onDeviceFound(ScanResult result) {
-    final rawId = result.device.remoteId.str.isNotEmpty
-        ? result.device.remoteId.str
-        : result.device.remoteId.toString();
-
-    final deviceId = rawId.trim().toUpperCase();
-
-    String rawName = '';
-    if (result.advertisementData.advName.trim().isNotEmpty) {
-      rawName = result.advertisementData.advName.trim();
-    } else if (result.device.platformName.trim().isNotEmpty) {
-      rawName = result.device.platformName.trim();
-    }
-
+  void _onRecord(BleScanRecord record) {
+    if (!ref.mounted) return;
     final manufacturer = BluetoothDeviceInspector.resolveManufacturer(
-      deviceId,
-      result.advertisementData.manufacturerData,
+      record.id,
+      record.manufacturerData,
     );
-
-    final serviceUuids = result.advertisementData.serviceUuids
-        .map((u) => u.toString())
-        .toList();
-
     final deviceType = BluetoothDeviceInspector.resolveDeviceType(
-      rawName,
+      record.name,
       manufacturer,
-      serviceUuids,
+      record.serviceUuids,
     );
 
-    _hasRealDevices = true;
+    final existing = _find(record.id);
+    final name = record.name.isNotEmpty
+        ? record.name
+        : (existing != null && existing.name.isNotEmpty
+            ? existing.name
+            : _inferDeviceName(manufacturer, deviceType, record.id));
 
-    final deviceMap = <String, ScannedDeviceModel>{};
-    for (final d in state.devices) {
-      if (!_mockIds.contains(d.id)) {
-        deviceMap[d.id.trim().toUpperCase()] = d;
-      }
-    }
-
-    String finalName = rawName;
-    if (finalName.isEmpty || finalName == 'Unknown Device') {
-      if (deviceMap.containsKey(deviceId) &&
-          deviceMap[deviceId]!.name.isNotEmpty &&
-          deviceMap[deviceId]!.name != 'Unknown Device') {
-        finalName = deviceMap[deviceId]!.name;
-      } else {
-        finalName = _inferDeviceName(manufacturer, deviceType, deviceId);
-      }
-    }
-
-    int smoothedRssi = result.rssi;
-    DateTime firstSeen = result.timeStamp;
-    bool isConnected = false;
-    bool isConnecting = false;
-    int? batteryLevel;
-    String? fullGattName;
-
-    if (deviceMap.containsKey(deviceId)) {
-      final existing = deviceMap[deviceId]!;
-      smoothedRssi = ((0.4 * result.rssi) + (0.6 * existing.rssi)).round();
-      firstSeen = existing.firstSeen;
-      isConnected = existing.isConnected;
-      isConnecting = existing.isConnecting;
-      batteryLevel = existing.batteryLevel;
-      fullGattName = existing.fullGattName;
-    }
-
-    final newDevice = ScannedDeviceModel(
-      id: deviceId,
-      name: finalName,
+    final device = ScannedDeviceModel(
+      id: record.id,
+      name: name,
       manufacturer: manufacturer,
       deviceType: deviceType,
-      rssi: smoothedRssi,
-      txPower: result.advertisementData.txPowerLevel ?? deviceMap[deviceId]?.txPower,
-      isConnectable: result.advertisementData.connectable,
-      serviceUuids: serviceUuids.isNotEmpty
-          ? serviceUuids
-          : (deviceMap[deviceId]?.serviceUuids ?? const []),
-      lastSeen: result.timeStamp,
-      firstSeen: firstSeen,
-      isConnected: isConnected,
-      isConnecting: isConnecting,
-      batteryLevel: batteryLevel,
-      fullGattName: fullGattName,
+      // Light smoothing keeps the list readable without hiding movement.
+      rssi: existing == null
+          ? record.rssi
+          : ((0.6 * record.rssi) + (0.4 * existing.rssi)).round(),
+      txPower: record.txPower ?? existing?.txPower,
+      isConnectable: record.isConnectable,
+      serviceUuids: record.serviceUuids.isNotEmpty
+          ? record.serviceUuids
+          : (existing?.serviceUuids ?? const []),
+      lastSeen: record.timestamp,
+      firstSeen: existing?.firstSeen ?? record.timestamp,
+      isConnected: existing?.isConnected ?? false,
+      isConnecting: existing?.isConnecting ?? false,
+      batteryLevel: existing?.batteryLevel,
+      fullGattName: existing?.fullGattName,
     );
 
-    deviceMap[deviceId] = newDevice;
+    final devices = [
+      for (final d in state.devices)
+        if (d.id != record.id) d,
+      device,
+    ]..sort((a, b) => b.firstSeen.compareTo(a.firstSeen));
 
-    final sortedDevices = deviceMap.values.toList()
-      ..sort((a, b) => b.firstSeen.compareTo(a.firstSeen));
+    state = state.copyWith(devices: devices);
+  }
 
-    state = state.copyWith(devices: sortedDevices);
-
-    // Auto trigger GATT connection probe in background for connectable targets
-    if (result.advertisementData.connectable && !_autoProbedIds.contains(deviceId)) {
-      _autoProbedIds.add(deviceId);
-      Future.delayed(const Duration(milliseconds: 500), () {
-        probeDeviceConnection(deviceId);
-      });
+  ScannedDeviceModel? _find(String id) {
+    for (final d in state.devices) {
+      if (d.id == id) return d;
     }
+    return null;
+  }
+
+  void _replace(
+    String id,
+    ScannedDeviceModel Function(ScannedDeviceModel) update,
+  ) {
+    state = state.copyWith(
+      devices: [
+        for (final d in state.devices) d.id == id ? update(d) : d,
+      ],
+    );
   }
 
   String _inferDeviceName(String manufacturer, String deviceType, String mac) {
-    final macSuffix = mac.length >= 4 ? mac.substring(mac.length - 4) : mac;
+    final macSuffix = mac.length >= 5 ? mac.substring(mac.length - 5) : mac;
 
     if (manufacturer.contains('Apple')) {
       return 'Apple Device ($macSuffix)';
     } else if (manufacturer.contains('Samsung')) {
       return 'Samsung Device ($macSuffix)';
     } else if (manufacturer.contains('Espressif')) {
-      return 'ESP32 Covert Bug ($macSuffix)';
+      return 'ESP32 Module ($macSuffix)';
     } else if (manufacturer.contains('Sony') || manufacturer.contains('Bose')) {
       return '$manufacturer Headset ($macSuffix)';
     } else if (deviceType.contains('Audio')) {
@@ -601,27 +343,24 @@ class ScannerNotifier extends Notifier<ScannerState> {
     } else if (deviceType.contains('Wearable')) {
       return 'Smartband / Watch ($macSuffix)';
     } else {
-      return 'BLE Target ($macSuffix)';
+      return 'BLE Device ($macSuffix)';
     }
   }
 
   void clearResults() {
-    _hasRealDevices = false;
-    _autoProbedIds.clear();
     state = state.copyWith(devices: []);
   }
 
-  void _stopSubscriptions() {
-    _cycleTimer?.cancel();
-    _cycleTimer = null;
-    _simulationFallbackTimer?.cancel();
-    _simulationFallbackTimer = null;
-    _scanSubscription?.cancel();
-    _scanSubscription = null;
-    _isScanningSubscription?.cancel();
-    _isScanningSubscription = null;
-    _adapterStateSub?.cancel();
-    _adapterStateSub = null;
+  void _stop({bool keepAdapterListener = false}) {
+    _evictTimer?.cancel();
+    _evictTimer = null;
+    _recordsSub?.cancel();
+    _recordsSub = null;
+    _bluetooth.stopScan(_scanOwner);
+    if (!keepAdapterListener) {
+      _adapterSub?.cancel();
+      _adapterSub = null;
+    }
   }
 }
 
