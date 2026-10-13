@@ -9,7 +9,7 @@ import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
 import 'package:exam_guard/features/magnetic/view_model/magnetic_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:exam_guard/core/navigation/app_router.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';

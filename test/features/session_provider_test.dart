@@ -37,7 +37,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      await container.read(sessionViewModelProvider.future);
+      expect(container.read(sessionViewModelProvider), isNull);
       final viewModel = container.read(sessionViewModelProvider.notifier);
       await viewModel.createSession(
         instituteName: 'Test School',
@@ -61,13 +61,32 @@ void main() {
       expect(ended?.endTime, isNotNull);
       expect(storage.read<String>('current_session_id'), isNull);
 
+      // Logging after the exam ended is rejected.
+      await expectLater(
+        viewModel.addLog(
+          ActionLogModel(
+            deviceName: 'Late',
+            deviceId: '',
+            category: '',
+            severity: LogSeverity.low,
+            location: '',
+            notes: '',
+            createdAt: DateTime(2026),
+          ),
+        ),
+        throwsA(isA<NoActiveSessionException>()),
+      );
+
       // A fresh read from storage returns the same ended session and its log.
       final reloaded = ProviderContainer(
         overrides: [localStorageProvider.overrideWithValue(storage)],
       );
       addTearDown(reloaded.dispose);
-      expect(await reloaded.read(sessionViewModelProvider.future), isNull);
-      final all = await reloaded.read(sessionRepositoryProvider).allSessions();
+      // The ended exam is no longer running, but its report is reachable.
+      expect(reloaded.read(sessionViewModelProvider), isNull);
+      final last = reloaded.read(sessionViewModelProvider.notifier).lastSession;
+      expect(last?.deviceLogs.single.severity, LogSeverity.high);
+      final all = reloaded.read(sessionRepositoryProvider).allSessions();
       expect(all.single.endTime, isNotNull);
       expect(all.single.deviceLogs.single.severity, LogSeverity.high);
     },

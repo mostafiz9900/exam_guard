@@ -4,64 +4,76 @@ import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 import 'package:exam_guard/features/session/repository/session_repository.dart';
 
-/// The active session, the just-ended session (until a new one starts),
-/// or null.
-class SessionViewModel extends AsyncNotifier<SessionModel?> {
+/// Thrown when an incident is logged without a running exam.
+class NoActiveSessionException implements Exception {
+  const NoActiveSessionException();
+
+  @override
+  String toString() => 'No exam session is running.';
+}
+
+/// The running exam, or the exam whose report is being viewed, or null.
+class SessionViewModel extends Notifier<SessionModel?> {
   late SessionRepository _repository;
 
   @override
-  Future<SessionModel?> build() async {
+  SessionModel? build() {
     _repository = ref.watch(sessionRepositoryProvider);
-    return _repository.currentSession();
+    return _repository.activeSession();
   }
+
+  /// The most recent exam, so its report can be reopened after a restart.
+  SessionModel? get lastSession => _repository.lastSession();
 
   Future<void> createSession({
     required String instituteName,
     required String teacherName,
     required String roomNumber,
   }) async {
-    state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() async {
-      final session = SessionModel(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        instituteName: instituteName,
-        teacherName: teacherName,
-        roomNumber: roomNumber,
-        startTime: DateTime.now(),
-      );
-      await _repository.saveActive(session);
-      return session;
-    });
-    if (state case AsyncError(:final error, :final stackTrace)) {
-      Error.throwWithStackTrace(error, stackTrace);
+    // Never leave a running exam orphaned.
+    final running = state;
+    if (running != null && running.isActive) {
+      await _repository.save(running.copyWith(endTime: DateTime.now()));
     }
+    final session = SessionModel(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      instituteName: instituteName,
+      teacherName: teacherName,
+      roomNumber: roomNumber,
+      startTime: DateTime.now(),
+    );
+    await _repository.save(session);
+    state = session;
   }
 
-  /// Stamps the end time, persists it, and keeps the ended session in state
-  /// so the report screen can show and export it.
+  /// Stamps the end time and keeps the ended session in state for the report.
   Future<SessionModel?> endCurrentSession() async {
-    final current = state.value;
-    if (current == null || current.endTime != null) return current;
+    final current = state;
+    if (current == null || !current.isActive) return current;
     final ended = current.copyWith(endTime: DateTime.now());
-    await _repository.saveEnded(ended);
-    state = AsyncValue.data(ended);
+    await _repository.save(ended);
+    state = ended;
     return ended;
   }
 
+  /// Shows the last exam's report (read-only).
+  void openLastSession() => state = _repository.lastSession();
+
+  /// Clears an ended session so a new exam can be set up.
+  void closeEndedSession() {
+    if (state != null && !state!.isActive) state = null;
+  }
+
   Future<void> addLog(ActionLogModel log) async {
-    final current = state.value;
-    if (current == null) return;
-    final updated = current.copyWith(deviceLogs: [...current.deviceLogs, log]);
-    if (current.endTime == null) {
-      await _repository.saveActive(updated);
-    } else {
-      await _repository.saveEnded(updated);
+    final current = state;
+    if (current == null || !current.isActive) {
+      throw const NoActiveSessionException();
     }
-    state = AsyncValue.data(updated);
+    final updated = current.copyWith(deviceLogs: [...current.deviceLogs, log]);
+    await _repository.save(updated);
+    state = updated;
   }
 }
 
 final sessionViewModelProvider =
-    AsyncNotifierProvider<SessionViewModel, SessionModel?>(
-      SessionViewModel.new,
-    );
+    NotifierProvider<SessionViewModel, SessionModel?>(SessionViewModel.new);

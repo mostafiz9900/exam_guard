@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'package:exam_guard/core/navigation/app_router.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
@@ -30,7 +30,7 @@ class DashboardScreen extends HookConsumerWidget {
     // Watch live state providers
     final scannerState = ref.watch(scannerViewModelProvider);
     final magneticState = ref.watch(magneticViewModelProvider);
-    final session = ref.watch(sessionViewModelProvider).value;
+    final session = ref.watch(sessionViewModelProvider);
 
     final room = session?.roomNumber.isNotEmpty == true
         ? 'Room ${session!.roomNumber}'

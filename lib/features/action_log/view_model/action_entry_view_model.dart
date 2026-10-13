@@ -52,14 +52,14 @@ class ActionEntryViewModel extends Notifier<ActionEntryState> {
         .read(actionLogRepositoryProvider)
         .buildTextReport(
           log: log,
-          session: ref.read(sessionViewModelProvider).value,
+          session: ref.read(sessionViewModelProvider),
           scannedDevice: scannedDevice,
         );
   }
 
   /// Opens the share sheet. Returns a message to show, or null.
   Future<String?> shareReport(String text) async {
-    final room = ref.read(sessionViewModelProvider).value?.roomNumber ?? '';
+    final room = ref.read(sessionViewModelProvider)?.roomNumber ?? '';
     try {
       final outcome = await ref
           .read(actionLogRepositoryProvider)

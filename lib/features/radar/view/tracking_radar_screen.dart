@@ -10,7 +10,7 @@ import 'package:exam_guard/core/widgets/primary_button.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/radar/view_model/tracking_radar_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:exam_guard/core/navigation/app_router.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';

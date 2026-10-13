@@ -5,7 +5,7 @@ import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
-import 'package:exam_guard/core/navigation/app_router.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/utils/app_date_format.dart';
@@ -34,7 +34,7 @@ class ReportSummaryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final session = ref.watch(sessionViewModelProvider).value;
+    final session = ref.watch(sessionViewModelProvider);
     final logs = session?.deviceLogs ?? const <ActionLogModel>[];
     final reportState = ref.watch(reportViewModelProvider);
 

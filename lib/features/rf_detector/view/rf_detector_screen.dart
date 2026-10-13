@@ -7,7 +7,7 @@ import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
 import 'package:exam_guard/features/rf_detector/view_model/rf_detector_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:exam_guard/core/navigation/app_router.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/features/rf_detector/model/rf_threat_level.dart';
 import 'package:exam_guard/features/rf_detector/view/widgets/guide_step_tile.dart';

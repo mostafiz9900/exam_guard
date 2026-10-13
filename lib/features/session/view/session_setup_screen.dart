@@ -10,7 +10,7 @@ import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/custom_text_field.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
-import 'package:exam_guard/core/navigation/app_router.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 

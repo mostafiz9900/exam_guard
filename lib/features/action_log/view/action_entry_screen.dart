@@ -8,7 +8,7 @@ import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/custom_text_field.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
-import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/action_log/view_model/action_entry_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -16,16 +16,16 @@ import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 
 class ActionEntryScreen extends HookConsumerWidget {
-  const ActionEntryScreen({super.key, this.initialDevice});
+  const ActionEntryScreen({super.key, required this.args});
 
-  final ScannedDeviceModel? initialDevice;
+  final ActionEntryArgs args;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final deviceName = useTextEditingController(
-      text: initialDevice?.name ?? '',
+      text: args.device?.name ?? '',
     );
-    final deviceId = useTextEditingController(text: initialDevice?.id ?? '');
+    final deviceId = useTextEditingController(text: args.device?.id ?? '');
     final location = useTextEditingController();
     final notes = useTextEditingController();
 
@@ -46,7 +46,7 @@ class ActionEntryScreen extends HookConsumerWidget {
     void showExportReportModal() {
       final textReport = viewModel.textReport(
         currentLog(),
-        scannedDevice: initialDevice,
+        scannedDevice: args.device,
       );
 
       showModalBottomSheet(

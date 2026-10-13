@@ -15,6 +15,9 @@ class SessionModel {
   final DateTime? endTime;
   final List<ActionLogModel> deviceLogs;
 
+  /// True while the exam is running.
+  bool get isActive => endTime == null;
+
   const SessionModel({
     required this.id,
     required this.instituteName,
