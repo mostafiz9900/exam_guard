@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil_plus/flutter_screenutil_plus.dart';
-import '../theme/app_dimens.dart';
+import 'package:exam_guard/core/theme/app_dimens.dart';
+import 'package:exam_guard/core/utils/size_extensions.dart';
 
 /// Reusable text field component for ExamGuard presentation layer.
 ///

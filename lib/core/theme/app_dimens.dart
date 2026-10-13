@@ -1,4 +1,4 @@
-import 'package:flutter_screenutil_plus/flutter_screenutil_plus.dart';
+import 'package:exam_guard/core/utils/size_extensions.dart';
 
 /// Standardized app dimensions for paddings, margins, radii, and font sizes.
 ///

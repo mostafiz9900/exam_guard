@@ -1,6 +1,6 @@
 import 'package:sensors_plus/sensors_plus.dart';
 
-import 'i_magnetometer_service.dart';
+import 'package:exam_guard/core/services/sensors/i_magnetometer_service.dart';
 
 class MagnetometerServiceImpl implements IMagnetometerService {
   @override
@@ -8,7 +8,8 @@ class MagnetometerServiceImpl implements IMagnetometerService {
     return magnetometerEventStream(
       samplingPeriod: SensorInterval.gameInterval,
     ).map(
-      (e) => MagnetometerReading(x: e.x, y: e.y, z: e.z, timestamp: e.timestamp),
+      (e) =>
+          MagnetometerReading(x: e.x, y: e.y, z: e.z, timestamp: e.timestamp),
     );
   }
 }

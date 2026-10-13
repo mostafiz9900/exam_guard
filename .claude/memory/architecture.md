@@ -18,40 +18,41 @@ Feature-first + MVVM. No use cases. Every package wrapped in `lib/core/`.
 View (widget) ──watch/read──▶ ViewModel (Notifier) ──▶ Repository ──▶ core service wrapper ──▶ package
 ```
 
-## Folder Structure (target)
+## Folder Structure
 ```
 lib/
-├── main.dart                     # bootstrap only
-├── app/
-│   └── exam_guard_app.dart       # MaterialApp.router, theme, locale
+├── main.dart                     # bootstrap only (localization, storage, ProviderScope)
+├── app/exam_guard_app.dart       # MaterialApp.router, theme, locale
 ├── core/
-│   ├── navigation/               # AppRouter, AppRoutes, AppNavigator
-│   ├── localization/             # AppLocalization wrapper
+│   ├── localization/             # AppLocalization, String.tr(), context.setAppLocale
+│   ├── navigation/               # AppRouter + AppRoute, AppNavigator extension
 │   ├── services/
-│   │   ├── bluetooth/            # IBluetoothService + impl
-│   │   ├── sensors/              # IMagnetometerService + impl
-│   │   ├── permission/           # IPermissionService + impl
-│   │   ├── storage/              # ILocalStorage + Hive impl
+│   │   ├── audio/                # GeigerBuzzerService (+ provider)
+│   │   ├── bluetooth/            # IBluetoothService: one shared scan, owner-counted
 │   │   ├── logger/               # AppLogger
-│   │   ├── toast/                # AppToast
-│   │   ├── audio/                # GeigerBuzzerService
-│   │   └── report/               # ViolationReportService
-│   ├── theme/                    # AppTheme, AppColors, AppTextStyles, AppDimens
-│   ├── utils/                    # size extensions, formatters
-│   └── widgets/                  # AppLoader, AppShimmer, PrimaryButton, ...
+│   │   ├── pdf/                  # IPdfService + PdfTableDocument
+│   │   ├── permission/           # IPermissionService
+│   │   ├── sensors/              # IMagnetometerService
+│   │   ├── share/                # IShareService (files + text)
+│   │   ├── storage/              # ILocalStorage (key-value) + Hive impl
+│   │   └── toast/                # AppToast
+│   ├── settings/                 # ThemeModeViewModel
+│   ├── theme/                    # AppTheme, AppColors, AppDimens
+│   ├── utils/                    # size_extensions, AppDateFormat
+│   └── widgets/                  # PrimaryButton, AppLoader, AppShimmer, ...
 └── features/
-    ├── session/      { model, repository, view_model, view }
-    ├── dashboard/    { view_model, view }
-    ├── scanner/      { model, repository, view_model, view }   # wireless BLE
-    ├── magnetic/     { model, repository, view_model, view }
-    ├── radar/        { model, view_model, view }
-    ├── rf_detector/  { model, repository, view_model, view }
-    ├── action_log/   { model, repository, view_model, view }
-    └── report/       { view_model, view }
+    ├── session/      model (SessionModel, ActionLogModel) · repository · view_model · view
+    ├── dashboard/    view (+ widgets) — reads other features' view models
+    ├── scanner/      model · repository (ScannerRepository, BluetoothDeviceInspector) · view_model · view (+ widgets)
+    ├── radar/        model · repository · view_model · view (+ widgets)
+    ├── magnetic/     model · repository · view_model · view (+ widgets)
+    ├── rf_detector/  model · repository · view_model · view (+ widgets)
+    ├── action_log/   repository · view_model · view
+    └── report/       repository · view_model · view (+ widgets)
 ```
 
 ## Data Flow
-Session is created on setup screen → saved to Hive → ViewModels read the active session via `sessionViewModelProvider`. Action logs reference the session id.
+Session is created on the setup screen → `SessionRepository` stores it under `session_<id>` (+ `current_session_id`) → screens read it via `sessionViewModelProvider`. Incidents are `ActionLogModel`s stored inside the session. End Exam stamps `endTime` and opens the report, which exports a PDF through the share sheet.
 
 ## External Services
 - Optional ESP32 hardware node over BLE (name contains `esp32` / `examguard` / `rf-node`)

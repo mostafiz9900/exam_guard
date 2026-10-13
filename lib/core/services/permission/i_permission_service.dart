@@ -1,6 +1,6 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'permission_service_impl.dart';
+import 'package:exam_guard/core/services/permission/permission_service_impl.dart';
 
 enum AppPermissionStatus { granted, denied, permanentlyDenied }
 

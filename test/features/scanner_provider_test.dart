@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
-import 'package:exam_guard/features/scanner/application/scanner_provider.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -14,8 +14,7 @@ class FakeBluetoothService implements IBluetoothService {
   Future<bool> isSupported() async => true;
 
   @override
-  Stream<BleAdapterStatus> adapterStatus() =>
-      Stream.value(BleAdapterStatus.on);
+  Stream<BleAdapterStatus> adapterStatus() => Stream.value(BleAdapterStatus.on);
 
   @override
   Future<void> turnOn() async {}
@@ -50,15 +49,15 @@ class GrantedPermissions implements IPermissionService {
 }
 
 BleScanRecord record(String id, int rssi) => BleScanRecord(
-      id: id,
-      name: 'Phone $id',
-      rssi: rssi,
-      txPower: null,
-      isConnectable: true,
-      serviceUuids: const [],
-      manufacturerData: const {},
-      timestamp: DateTime.now(),
-    );
+  id: id,
+  name: 'Phone $id',
+  rssi: rssi,
+  txPower: null,
+  isConnectable: true,
+  serviceUuids: const [],
+  manufacturerData: const {},
+  timestamp: DateTime.now(),
+);
 
 void main() {
   late FakeBluetoothService bluetooth;
@@ -72,14 +71,14 @@ void main() {
         permissionServiceProvider.overrideWithValue(GrantedPermissions()),
       ],
     );
-    container.listen(scannerProvider, (_, _) {});
+    container.listen(scannerViewModelProvider, (_, _) {});
     await pumpEventQueue();
   });
 
   tearDown(() => container.dispose());
 
   test('starts a live scan and shows no devices until one advertises', () {
-    final state = container.read(scannerProvider);
+    final state = container.read(scannerViewModelProvider);
     expect(state.isScanning, isTrue);
     expect(state.devices, isEmpty);
     expect(bluetooth.owners, contains('wireless_scanner'));
@@ -88,11 +87,11 @@ void main() {
   test('every advertisement updates the device list immediately', () async {
     bluetooth.records.add(record('AA:BB', -70));
     await pumpEventQueue();
-    expect(container.read(scannerProvider).devices.single.rssi, -70);
+    expect(container.read(scannerViewModelProvider).devices.single.rssi, -70);
 
     bluetooth.records.add(record('AA:BB', -50));
     await pumpEventQueue();
-    final rssi = container.read(scannerProvider).devices.single.rssi;
+    final rssi = container.read(scannerViewModelProvider).devices.single.rssi;
     expect(rssi, greaterThan(-70));
   });
 
@@ -101,17 +100,19 @@ void main() {
     await pumpEventQueue();
 
     await container
-        .read(scannerProvider.notifier)
+        .read(scannerViewModelProvider.notifier)
         .probeDeviceConnection('AA:BB');
 
-    final state = container.read(scannerProvider);
+    final state = container.read(scannerViewModelProvider);
     expect(state.devices.single.isConnected, isFalse);
     expect(state.devices.single.batteryLevel, isNull);
     expect(state.errorMessage, contains('Could not connect'));
   });
 
   test('stopping the scan releases the radio', () async {
-    await container.read(scannerProvider.notifier).toggleScanning(false);
+    await container
+        .read(scannerViewModelProvider.notifier)
+        .toggleScanning(false);
     expect(bluetooth.owners, isEmpty);
   });
 }

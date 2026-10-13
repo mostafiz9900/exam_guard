@@ -1,6 +1,6 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'magnetometer_service_impl.dart';
+import 'package:exam_guard/core/services/sensors/magnetometer_service_impl.dart';
 
 /// One magnetometer sample in microtesla (μT).
 class MagnetometerReading {

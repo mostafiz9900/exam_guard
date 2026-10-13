@@ -12,7 +12,10 @@
 ❌ DON'T: Create `domain/`, `usecase/`, `application/`, or `infrastructure/` folders
 ❌ DON'T: Write use case classes — the ViewModel calls the Repository directly
 ❌ DON'T: Put business logic in widgets — Views only render state and forward events
-❌ DON'T: Import one feature's internals from another feature — move shared code to `core/`
+✅ DO: A feature may import another feature's `model/` and `view_model/` (its public API) — e.g. dashboard reads `sessionViewModelProvider`
+❌ DON'T: Import another feature's `repository/` or `view/` — move shared code to `core/`
+❌ DON'T: Import `core/services/*` or a repository from a `view/` — Views talk to ViewModels only
+✅ DO: ViewModels may use core value types (e.g. `AppPermissionStatus`), `AppLogger` and `GeigerBuzzerService` directly; data access goes through the Repository
 
 ## Riverpod
 ✅ DO: Declare providers by hand: `NotifierProvider`, `AsyncNotifierProvider`, `Provider`
@@ -31,18 +34,19 @@
 | flutter_blue_plus | `services/bluetooth/` → `IBluetoothService` (one shared scan, owner-counted) |
 | sensors_plus | `services/sensors/` → `IMagnetometerService` |
 | permission_handler | `services/permission/` → `IPermissionService` |
-| hive_flutter | `services/storage/` → `ILocalStorage` |
+| hive_flutter | `services/storage/` → `ILocalStorage` (generic key-value; feature repositories own the keys) |
 | logger | `services/logger/` → `AppLogger` |
-| bot_toast | `services/toast/` → `AppToast` |
-| go_router | `navigation/` → `AppRouter`, `AppRoutes`, `AppNavigator` |
-| easy_localization | `localization/` → `AppLocalization`, `String.tr` extension re-export |
-| flutter_screenutil_plus | `utils/size_extensions.dart` → `AppSize` / `.w .h .sp .r` |
-| google_fonts | `theme/app_text_styles.dart` → `AppTextStyles` |
+| bot_toast | `services/toast/app_toast.dart` → `AppToast` |
+| go_router | `navigation/` → `AppRouter`, `AppRoute`, `context.goTo / pushTo / popBack / canPopBack` |
+| easy_localization | `localization/app_localization.dart` → `AppLocalization`, `'key'.tr()`, `context.setAppLocale` |
+| intl (DateFormat) | `utils/app_date_format.dart` → `AppDateFormat.clock / shortDateTime / ...` |
+| flutter_screenutil_plus | `utils/size_extensions.dart` → `.w .h .sp .r`, `AppScreenSize` |
 | shimmer | `widgets/app_shimmer.dart` → `AppShimmer` |
-| flutter_spinkit | `widgets/app_loader.dart` → `AppLoader` |
-| lottie | `widgets/app_lottie.dart` → `AppLottie` |
+| flutter_spinkit | `widgets/app_loader.dart` → `AppLoader.ring / .ripple` |
 | share_plus | `services/share/` → `IShareService` |
-| pdf | `services/report/session_report_pdf_service.dart` → `SessionReportPdfService` |
+| pdf | `services/pdf/` → `IPdfService` + `PdfTableDocument` |
+
+Navigate with `AppRoute` constants, never string paths.
 
 Allowed direct imports in features (they ARE the MVVM framework): `flutter`, `hooks_riverpod`, `flutter_hooks`.
 

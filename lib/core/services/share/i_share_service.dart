@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'share_service_impl.dart';
+import 'package:exam_guard/core/services/share/share_service_impl.dart';
 
 enum ShareOutcome { shared, dismissed, unavailable }
 
@@ -15,6 +15,8 @@ abstract interface class IShareService {
     String? subject,
     String? text,
   });
+
+  Future<ShareOutcome> shareText(String text, {String? subject});
 }
 
 final shareServiceProvider = Provider<IShareService>(

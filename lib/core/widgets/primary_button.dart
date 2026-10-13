@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil_plus/flutter_screenutil_plus.dart';
-import 'package:flutter_spinkit/flutter_spinkit.dart';
 
-import '../theme/app_colors.dart';
-import '../theme/app_dimens.dart';
+import 'package:exam_guard/core/theme/app_colors.dart';
+import 'package:exam_guard/core/theme/app_dimens.dart';
+import 'package:exam_guard/core/widgets/app_loader.dart';
+import 'package:exam_guard/core/utils/size_extensions.dart';
 
 /// Primary button used across the app for strong calls to action.
 class PrimaryButton extends StatelessWidget {
@@ -49,7 +49,7 @@ class PrimaryButton extends StatelessWidget {
                   SizedBox(
                     width: 18.w,
                     height: 18.w,
-                    child: const SpinKitRing(
+                    child: const AppLoader.ring(
                       color: AppColors.onPrimary,
                       lineWidth: 2,
                       size: 18,

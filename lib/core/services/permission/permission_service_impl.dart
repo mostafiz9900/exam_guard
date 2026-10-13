@@ -1,6 +1,6 @@
 import 'package:permission_handler/permission_handler.dart';
 
-import 'i_permission_service.dart';
+import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 
 class PermissionServiceImpl implements IPermissionService {
   @override

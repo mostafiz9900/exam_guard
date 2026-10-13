@@ -1,61 +1,75 @@
-import 'package:exam_guard/core/services/local_storage/hive_storage_impl.dart';
-import 'package:exam_guard/core/services/local_storage/i_local_storage.dart';
-import 'package:exam_guard/features/session/application/session_provider.dart';
-import 'package:exam_guard/features/session/domain/session_model.dart';
+import 'package:exam_guard/core/services/storage/i_local_storage.dart';
+import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/session/repository/session_repository.dart';
+import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class InMemoryStorage implements ILocalStorage {
-  final sessions = <String, SessionModel>{};
-  String? currentId;
+  final values = <String, Object?>{};
 
   @override
-  Future<void> saveSession(SessionModel session) async {
-    sessions[session.id] = session;
-    currentId = session.id;
+  Future<void> write(String key, Object? value) async => values[key] = value;
+
+  @override
+  T? read<T>(String key) {
+    final v = values[key];
+    return v is T ? v : null;
   }
 
   @override
-  Future<SessionModel?> getCurrentSession() async =>
-      currentId == null ? null : sessions[currentId];
+  Future<void> delete(String key) async => values.remove(key);
 
   @override
-  Future<void> endSession(SessionModel session) async {
-    sessions[session.id] = session;
-    currentId = null;
-  }
-
-  @override
-  Future<List<SessionModel>> getAllSessions() async =>
-      sessions.values.toList();
+  Iterable<String> get keys => values.keys;
 
   @override
   Future<void> dispose() async {}
 }
 
 void main() {
-  test('ending the exam records the end time and keeps the report data',
-      () async {
-    final storage = InMemoryStorage();
-    final container = ProviderContainer(
-      overrides: [localStorageProvider.overrideWithValue(storage)],
-    );
-    addTearDown(container.dispose);
+  test(
+    'ending the exam records the end time and keeps the report data',
+    () async {
+      final storage = InMemoryStorage();
+      final container = ProviderContainer(
+        overrides: [localStorageProvider.overrideWithValue(storage)],
+      );
+      addTearDown(container.dispose);
 
-    await container.read(sessionProvider.future);
-    final notifier = container.read(sessionProvider.notifier);
-    await notifier.createSession(
-      instituteName: 'Test School',
-      teacherName: 'Inspector',
-      roomNumber: '12',
-    );
-    await notifier.addLog({'name': 'Phone', 'severity': 'HIGH'});
+      await container.read(sessionViewModelProvider.future);
+      final viewModel = container.read(sessionViewModelProvider.notifier);
+      await viewModel.createSession(
+        instituteName: 'Test School',
+        teacherName: 'Inspector',
+        roomNumber: '12',
+      );
+      await viewModel.addLog(
+        ActionLogModel(
+          deviceName: 'Phone',
+          deviceId: 'AA:BB',
+          category: 'Bluetooth Device',
+          severity: LogSeverity.high,
+          location: 'Desk 4',
+          notes: '',
+          createdAt: DateTime(2026, 10, 13, 10),
+        ),
+      );
 
-    final ended = await notifier.endCurrentSession();
+      final ended = await viewModel.endCurrentSession();
 
-    expect(ended?.endTime, isNotNull);
-    expect(storage.sessions.values.single.endTime, isNotNull);
-    expect(storage.currentId, isNull);
-    expect(container.read(sessionProvider).value?.deviceLogs, hasLength(1));
-  });
+      expect(ended?.endTime, isNotNull);
+      expect(storage.read<String>('current_session_id'), isNull);
+
+      // A fresh read from storage returns the same ended session and its log.
+      final reloaded = ProviderContainer(
+        overrides: [localStorageProvider.overrideWithValue(storage)],
+      );
+      addTearDown(reloaded.dispose);
+      expect(await reloaded.read(sessionViewModelProvider.future), isNull);
+      final all = await reloaded.read(sessionRepositoryProvider).allSessions();
+      expect(all.single.endTime, isNotNull);
+      expect(all.single.deviceLogs.single.severity, LogSeverity.high);
+    },
+  );
 }

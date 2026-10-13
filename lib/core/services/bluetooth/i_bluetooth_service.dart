@@ -1,7 +1,7 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import '../logger/app_logger.dart';
-import 'bluetooth_service_impl.dart';
+import 'package:exam_guard/core/services/logger/app_logger.dart';
+import 'package:exam_guard/core/services/bluetooth/bluetooth_service_impl.dart';
 
 enum BleAdapterStatus { on, off, unauthorized, unavailable, unknown }
 

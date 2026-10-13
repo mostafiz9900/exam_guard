@@ -1,8 +1,9 @@
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import '../settings/app_settings.dart';
+import 'package:exam_guard/core/localization/app_localization.dart';
+
+import 'package:exam_guard/core/settings/theme_mode_view_model.dart';
 
 class AppSettingsMenu extends ConsumerWidget {
   const AppSettingsMenu({super.key});
@@ -14,17 +15,23 @@ class AppSettingsMenu extends ConsumerWidget {
       onSelected: (action) {
         switch (action) {
           case _MenuAction.system:
-            ref.read(themeModeProvider.notifier).setMode(ThemeMode.system);
+            ref
+                .read(themeModeViewModelProvider.notifier)
+                .setMode(ThemeMode.system);
           case _MenuAction.light:
-            ref.read(themeModeProvider.notifier).setMode(ThemeMode.light);
+            ref
+                .read(themeModeViewModelProvider.notifier)
+                .setMode(ThemeMode.light);
           case _MenuAction.dark:
-            ref.read(themeModeProvider.notifier).setMode(ThemeMode.dark);
+            ref
+                .read(themeModeViewModelProvider.notifier)
+                .setMode(ThemeMode.dark);
           case _MenuAction.english:
-            context.setLocale(const Locale('en'));
+            context.setAppLocale(AppLocalization.english);
           case _MenuAction.bangla:
-            context.setLocale(const Locale('bn'));
+            context.setAppLocale(AppLocalization.bangla);
           case _MenuAction.arabic:
-            context.setLocale(const Locale('ar'));
+            context.setAppLocale(AppLocalization.arabic);
         }
       },
       itemBuilder: (context) => [

@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/services.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 /// Geiger Counter Audio Buzzer Service
 /// Emits audio pulses with frequency accelerating as inspector gets closer to threat (< 1.5m).
@@ -33,7 +35,9 @@ class GeigerBuzzerService {
     // Distance ~ 1.8m   => 250ms
     // Distance ~ 3.5m   => 600ms
     // Distance ~ 5.0m   => 1000ms
-    final intervalMs = ((distanceMeters / 5.0) * 880 + 120).clamp(120, 1000).toInt();
+    final intervalMs = ((distanceMeters / 5.0) * 880 + 120)
+        .clamp(120, 1000)
+        .toInt();
 
     _startGeigerLoop(Duration(milliseconds: intervalMs));
   }
@@ -53,3 +57,9 @@ class GeigerBuzzerService {
     _beepTimer = null;
   }
 }
+
+final geigerBuzzerProvider = Provider<GeigerBuzzerService>((ref) {
+  final buzzer = GeigerBuzzerService.instance;
+  ref.onDispose(buzzer.stopBuzzer);
+  return buzzer;
+});

@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-import '../logger/app_logger.dart';
-import 'i_bluetooth_service.dart';
+import 'package:exam_guard/core/services/logger/app_logger.dart';
+import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 
 class BluetoothServiceImpl implements IBluetoothService {
   BluetoothServiceImpl(this._logger);
@@ -170,13 +170,12 @@ class BluetoothServiceImpl implements IBluetoothService {
   }
 
   BleAdapterStatus _mapAdapterState(BluetoothAdapterState s) => switch (s) {
-        BluetoothAdapterState.on => BleAdapterStatus.on,
-        BluetoothAdapterState.off ||
-        BluetoothAdapterState.turningOff ||
-        BluetoothAdapterState.turningOn =>
-          BleAdapterStatus.off,
-        BluetoothAdapterState.unauthorized => BleAdapterStatus.unauthorized,
-        BluetoothAdapterState.unavailable => BleAdapterStatus.unavailable,
-        BluetoothAdapterState.unknown => BleAdapterStatus.unknown,
-      };
+    BluetoothAdapterState.on => BleAdapterStatus.on,
+    BluetoothAdapterState.off ||
+    BluetoothAdapterState.turningOff ||
+    BluetoothAdapterState.turningOn => BleAdapterStatus.off,
+    BluetoothAdapterState.unauthorized => BleAdapterStatus.unauthorized,
+    BluetoothAdapterState.unavailable => BleAdapterStatus.unavailable,
+    BluetoothAdapterState.unknown => BleAdapterStatus.unknown,
+  };
 }

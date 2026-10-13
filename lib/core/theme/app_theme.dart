@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'app_colors.dart';
-import 'app_dimens.dart';
+import 'package:exam_guard/core/theme/app_colors.dart';
+import 'package:exam_guard/core/theme/app_dimens.dart';
 
 class AppTheme {
   AppTheme._();

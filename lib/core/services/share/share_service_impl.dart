@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:share_plus/share_plus.dart';
 
-import 'i_share_service.dart';
+import 'package:exam_guard/core/services/share/i_share_service.dart';
 
 class ShareServiceImpl implements IShareService {
   @override
@@ -21,10 +21,20 @@ class ShareServiceImpl implements IShareService {
         text: text,
       ),
     );
-    return switch (result.status) {
-      ShareResultStatus.success => ShareOutcome.shared,
-      ShareResultStatus.dismissed => ShareOutcome.dismissed,
-      ShareResultStatus.unavailable => ShareOutcome.unavailable,
-    };
+    return _map(result.status);
   }
+
+  @override
+  Future<ShareOutcome> shareText(String text, {String? subject}) async {
+    final result = await SharePlus.instance.share(
+      ShareParams(text: text, subject: subject),
+    );
+    return _map(result.status);
+  }
+
+  ShareOutcome _map(ShareResultStatus status) => switch (status) {
+    ShareResultStatus.success => ShareOutcome.shared,
+    ShareResultStatus.dismissed => ShareOutcome.dismissed,
+    ShareResultStatus.unavailable => ShareOutcome.unavailable,
+  };
 }
