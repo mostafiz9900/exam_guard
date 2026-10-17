@@ -45,89 +45,91 @@ class CustomTextField extends StatelessWidget {
       ),
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          height: AppDimens.inputFieldHeight,
-          child: TextFormField(
-            controller: controller,
-            keyboardType: keyboardType,
-            obscureText: obscureText,
-            readOnly: readOnly,
-            onChanged: onChanged,
-            onTap: onTap,
-            onFieldSubmitted: onSubmitted,
-            textInputAction: textInputAction,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: AppDimens.bodyLarge,
-            ),
-            decoration: InputDecoration(
-              hintText: hintText,
-              hintStyle: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontSize: AppDimens.bodyMedium,
-              ),
-              filled: true,
-              fillColor: Theme.of(context).colorScheme.surface,
-              prefixIcon: prefixIcon != null
-                  ? Padding(
-                      padding: EdgeInsets.only(right: AppDimens.spacingSmall),
-                      child: IconTheme(
-                        data: IconThemeData(
-                          color: Theme.of(context).colorScheme.primary,
-                          size: 20.w,
-                        ),
-                        child: prefixIcon!,
-                      ),
-                    )
-                  : null,
-              suffixIcon: suffixIcon != null
-                  ? Padding(
-                      padding: EdgeInsets.only(left: AppDimens.spacingSmall),
-                      child: IconTheme(
-                        data: IconThemeData(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          size: 20.w,
-                        ),
-                        child: suffixIcon!,
-                      ),
-                    )
-                  : null,
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: AppDimens.spacingMedium,
-                vertical: AppDimens.spacingSmall,
-              ),
-              border: border,
-              enabledBorder: border,
-              focusedBorder: border.copyWith(
-                borderSide: BorderSide(
-                  color: Theme.of(context).colorScheme.primary,
-                  width: 1.5.w,
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      readOnly: readOnly,
+      onChanged: onChanged,
+      onTap: onTap,
+      onFieldSubmitted: onSubmitted,
+      textInputAction: textInputAction,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurface,
+        fontSize: AppDimens.bodyLarge,
+      ),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hintText,
+        hintStyle: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: AppDimens.bodyMedium,
+        ),
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surface,
+        prefixIcon: prefixIcon != null
+            ? Padding(
+                padding: EdgeInsetsDirectional.only(
+                  start: AppDimens.spacingSmall,
+                  end: AppDimens.spacingExtraSmall,
                 ),
-              ),
-              errorBorder: border.copyWith(
-                borderSide: BorderSide(
-                  color: Theme.of(context).colorScheme.error,
-                  width: 1.5.w,
+                child: IconTheme(
+                  data: IconThemeData(
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 20.w,
+                  ),
+                  child: prefixIcon!,
                 ),
-              ),
-              focusedErrorBorder: border.copyWith(
-                borderSide: BorderSide(
-                  color: Theme.of(context).colorScheme.error,
-                  width: 1.5.w,
+              )
+            : null,
+        prefixIconConstraints: BoxConstraints(minWidth: 40.w, minHeight: 40.w),
+        suffixIcon: suffixIcon != null
+            ? Padding(
+                padding: EdgeInsetsDirectional.only(
+                  start: AppDimens.spacingExtraSmall,
+                  end: AppDimens.spacingSmall,
                 ),
-              ),
-              errorText: errorText,
-              errorStyle: TextStyle(
-                color: Theme.of(context).colorScheme.error,
-                fontSize: AppDimens.bodySmall,
-              ),
-            ),
+                child: IconTheme(
+                  data: IconThemeData(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    size: 20.w,
+                  ),
+                  child: suffixIcon!,
+                ),
+              )
+            : null,
+        suffixIconConstraints: BoxConstraints(minWidth: 40.w, minHeight: 40.w),
+        contentPadding: EdgeInsetsDirectional.symmetric(
+          horizontal: AppDimens.spacingMedium,
+          vertical: AppDimens.spacingMedium,
+        ),
+        border: border,
+        enabledBorder: border,
+        focusedBorder: border.copyWith(
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.primary,
+            width: 1.5.w,
           ),
         ),
-      ],
+        errorBorder: border.copyWith(
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.error,
+            width: 1.5.w,
+          ),
+        ),
+        focusedErrorBorder: border.copyWith(
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.error,
+            width: 1.5.w,
+          ),
+        ),
+        errorText: errorText,
+        errorMaxLines: 2,
+        errorStyle: TextStyle(
+          color: Theme.of(context).colorScheme.error,
+          fontSize: AppDimens.bodySmall,
+        ),
+      ),
     );
   }
 }

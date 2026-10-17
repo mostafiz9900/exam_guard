@@ -16,7 +16,7 @@ class ExamGuardApp extends ConsumerWidget {
     return AppScreenSize(
       builder: (context) => MaterialApp.router(
         debugShowCheckedModeBanner: false,
-        title: 'ExamGuard',
+        onGenerateTitle: (_) => 'app_name'.tr(),
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: ref.watch(themeModeViewModelProvider),

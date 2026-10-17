@@ -18,7 +18,9 @@ class RfPacket {
   final int rssi;
   final DateTime timestamp;
 
-  /// True when the sender advertises as an ExamGuard ESP32 hardware node.
+  /// True when the sender's name starts with [RfRepository.nodeNamePrefix].
+  /// Generic ESP32 boards are NOT nodes: a DIY ESP32 is a typical cheating
+  /// device.
   final bool isExamGuardNode;
 }
 
@@ -27,7 +29,12 @@ class RfRepository {
   RfRepository(this._bluetooth, this._permissions);
 
   static const String _scanOwner = 'rf_detector';
-  static const List<String> _nodeKeywords = ['examguard', 'esp32', 'rf-node'];
+
+  /// Advertised-name prefix of ExamGuard hardware nodes (case-insensitive).
+  static const String nodeNamePrefix = 'examguard';
+
+  static bool isExamGuardNodeName(String name) =>
+      name.trim().toLowerCase().startsWith(nodeNamePrefix);
 
   final IBluetoothService _bluetooth;
   final IPermissionService _permissions;
@@ -38,17 +45,22 @@ class RfRepository {
   Future<bool> isBluetoothOn() async =>
       await _bluetooth.adapterStatus().first == BleAdapterStatus.on;
 
+  /// Current adapter status, then every change.
+  Stream<BleAdapterStatus> adapterStatus() => _bluetooth.adapterStatus();
+
+  /// Throws [BleScanException] when the radio cannot start scanning.
   Future<void> startScan() => _bluetooth.startScan(_scanOwner);
 
   Future<void> stopScan() => _bluetooth.stopScan(_scanOwner);
 
+  /// Scan failures arrive as [BleScanException] errors.
   Stream<RfPacket> packets() => _bluetooth.scanRecords.map(
     (r) => RfPacket(
       sourceId: r.id,
       sourceName: r.name,
       rssi: r.rssi,
       timestamp: r.timestamp,
-      isExamGuardNode: _nodeKeywords.any(r.name.toLowerCase().contains),
+      isExamGuardNode: isExamGuardNodeName(r.name),
     ),
   );
 }

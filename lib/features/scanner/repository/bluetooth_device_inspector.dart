@@ -116,19 +116,46 @@ class BluetoothDeviceInspector {
     return 'Generic BLE Hardware';
   }
 
+  /// 16-bit service UUIDs only audio devices advertise: A2DP, Headset,
+  /// Hands-Free, LE Audio, and Google Fast Pair (earbuds/headphones).
+  static const Set<String> _audioServiceUuids = {
+    '110A',
+    '110B',
+    '1108',
+    '111E',
+    '184E',
+    '1850',
+    '1853',
+    'FE2C',
+  };
+
+  /// Apple Continuity "proximity pairing" message, sent by AirPods / Beats.
+  static const int _appleProximityPairing = 0x07;
+
+  static String _shortUuid(String uuid) {
+    final u = uuid.toUpperCase();
+    // 0000XXXX-0000-1000-8000-00805F9B34FB → XXXX
+    return u.length == 36 && u.endsWith('-0000-1000-8000-00805F9B34FB')
+        ? u.substring(4, 8)
+        : u;
+  }
+
   /// Categorizes device into specific Exam Security Category
   static String resolveDeviceType(
     String name,
     String manufacturer,
-    List<String> serviceUuids,
-  ) {
+    List<String> serviceUuids, [
+    Map<int, List<int>> manufacturerData = const {},
+  ]) {
     final lowerName = name.toLowerCase();
     final lowerMfg = manufacturer.toLowerCase();
 
-    final hasAudioUuid = serviceUuids.any(
-      (u) =>
-          u.toUpperCase().contains('180A') || u.toUpperCase().contains('FE9F'),
-    );
+    final apple = manufacturerData[0x004C];
+    final hasAudioUuid =
+        serviceUuids.any((u) => _audioServiceUuids.contains(_shortUuid(u))) ||
+        (apple != null &&
+            apple.isNotEmpty &&
+            apple.first == _appleProximityPairing);
 
     // 1. Detect Wi-Fi Hotspot / Mobile Tethering AP Broadcasts
     if (lowerName.contains('hotspot') ||
@@ -137,7 +164,6 @@ class BluetoothDeviceInspector {
         lowerName.contains('androidap') ||
         lowerName.contains('netgear') ||
         lowerName.contains('tp-link') ||
-        lowerName.contains('huawei') ||
         lowerName.contains('my wifi') ||
         lowerName.contains('mobile_ap') ||
         lowerName.contains('portable')) {
@@ -145,7 +171,9 @@ class BluetoothDeviceInspector {
     }
 
     // 2. Detect Smart Earpieces / Earbuds / Headphones
-    if (lowerName.contains('ear') ||
+    if (lowerName.contains('earbud') ||
+        lowerName.contains('earphone') ||
+        lowerName.contains('earpiece') ||
         lowerName.contains('bud') ||
         lowerName.contains('tws') ||
         lowerName.contains('headset') ||

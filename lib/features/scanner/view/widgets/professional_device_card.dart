@@ -1,7 +1,9 @@
+import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/app_date_format.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/scanner/view/device_type_labels.dart';
 import 'package:exam_guard/features/scanner/view/widgets/signal_bars_widget.dart';
 import 'package:flutter/material.dart';
 
@@ -21,15 +23,17 @@ class ProfessionalDeviceCard extends StatelessWidget {
   final VoidCallback onInfoTap;
   final VoidCallback onDisconnectTap;
 
+  /// Strong signal = close = suspicious, so it is red (same thresholds as
+  /// the dashboard: > -65 dBm strong, > -75 dBm near).
   Color _getSignalColor(int rssi) {
-    if (rssi > -60) {
-      return const Color(0xFF10B981); // Green (Strong)
+    if (rssi > -65) {
+      return const Color(0xFFEF4444); // Red (very close)
     } else if (rssi > -75) {
-      return const Color(0xFFF59E0B); // Yellow (Good)
+      return const Color(0xFFF97316); // Orange (near)
     } else if (rssi > -88) {
-      return const Color(0xFFF97316); // Orange (Medium)
+      return const Color(0xFFF59E0B); // Amber (in range)
     } else {
-      return const Color(0xFFEF4444); // Red (Weak)
+      return const Color(0xFF10B981); // Green (distant)
     }
   }
 
@@ -49,17 +53,8 @@ class ProfessionalDeviceCard extends StatelessWidget {
     }
   }
 
-  String _getShortCategoryLabel(String type) {
-    if (type.contains('ESP32')) return 'Covert ESP32';
-    if (type.contains('Audio')) return 'Smart Earpiece';
-    if (type.contains('Hotspot') || type.contains('AP')) return 'Wi-Fi Hotspot';
-    if (type.contains('Wearable')) return 'Smartwatch';
-    if (type.contains('Smartphone')) return 'Smartphone';
-    return 'BLE Target';
-  }
-
   int _getSignalBars(int rssi) {
-    if (rssi > -60) return 4;
+    if (rssi > -65) return 4;
     if (rssi > -75) return 3;
     if (rssi > -88) return 2;
     return 1;
@@ -149,9 +144,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                                     SizedBox(width: 3.w),
                                     Flexible(
                                       child: Text(
-                                        _getShortCategoryLabel(
-                                          device.deviceType,
-                                        ),
+                                        deviceTypeShortLabel(device.deviceType),
                                         style: TextStyle(
                                           fontSize: 9.sp,
                                           fontWeight: FontWeight.bold,
@@ -178,7 +171,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(5.r),
                                 ),
                                 child: Text(
-                                  device.manufacturer,
+                                  manufacturerLabel(device.manufacturer),
                                   style: Theme.of(context).textTheme.labelSmall
                                       ?.copyWith(
                                         fontSize: 9.sp,
@@ -253,9 +246,12 @@ class ProfessionalDeviceCard extends StatelessWidget {
                       ),
                       SizedBox(height: 2.h),
                       Text(
-                        bars == 4
-                            ? 'CRITICAL'
-                            : (bars == 3 ? 'STRONG' : 'DISTANT'),
+                        switch (bars) {
+                          4 => 'scan_proximity_very_close'.tr(),
+                          3 => 'scan_proximity_near'.tr(),
+                          2 => 'scan_proximity_in_range'.tr(),
+                          _ => 'scan_proximity_distant'.tr(),
+                        },
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           fontSize: 9.sp,
                           fontWeight: FontWeight.bold,
@@ -286,7 +282,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                           ),
                           SizedBox(width: 4.w),
                           Text(
-                            'CONNECTED',
+                            'scan_connected_badge'.tr(),
                             style: TextStyle(
                               fontSize: 10.sp,
                               fontWeight: FontWeight.bold,
@@ -322,7 +318,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                           onPressed: onDisconnectTap,
                           icon: Icon(Icons.link_off_rounded, size: 13.w),
                           label: Text(
-                            'Disconnect',
+                            'scan_disconnect'.tr(),
                             style: TextStyle(fontSize: 10.sp),
                           ),
                         ),
@@ -345,7 +341,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                         color: Theme.of(context).colorScheme.primary,
                       ),
                       label: Text(
-                        'Track Radar',
+                        'scan_track_radar'.tr(),
                         style: TextStyle(fontSize: 11.sp),
                       ),
                       style: OutlinedButton.styleFrom(
@@ -361,7 +357,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                       onPressed: onLogTap,
                       icon: Icon(Icons.report_problem_rounded, size: 15.w),
                       label: Text(
-                        'Log Violation',
+                        'scan_log_violation'.tr(),
                         style: TextStyle(fontSize: 11.sp),
                       ),
                       style: ElevatedButton.styleFrom(
@@ -374,7 +370,7 @@ class ProfessionalDeviceCard extends StatelessWidget {
                   SizedBox(width: 4.w),
                   IconButton(
                     icon: Icon(Icons.info_outline_rounded, size: 18.w),
-                    tooltip: 'Inspect BLE Payload',
+                    tooltip: 'scan_inspect_payload'.tr(),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     onPressed: onInfoTap,

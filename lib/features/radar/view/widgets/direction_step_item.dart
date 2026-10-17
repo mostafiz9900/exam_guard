@@ -60,8 +60,10 @@ class DirectionStepItem extends StatelessWidget {
                 SizedBox(height: 4.h),
                 Text(
                   description,
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: Colors.grey.shade800, height: 1.3),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    height: 1.3,
+                  ),
                 ),
               ],
             ),

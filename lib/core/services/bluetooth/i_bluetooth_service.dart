@@ -31,6 +31,29 @@ class BleScanRecord {
   final DateTime timestamp;
 }
 
+/// A BLE scan could not start or stopped with an error. [message] is
+/// ready to show to the user.
+enum BleScanError {
+  /// Android 11 and older need Location (GPS) switched on to scan.
+  locationOff,
+
+  /// Android blocked scanning after too many starts; resumes in ~30 s.
+  throttled,
+  other,
+}
+
+class BleScanException implements Exception {
+  const BleScanException(this.message, {this.code = BleScanError.other});
+
+  final String message;
+
+  /// What went wrong, for callers that show their own translated text.
+  final BleScanError code;
+
+  @override
+  String toString() => message;
+}
+
 /// What a GATT connection could read from a device.
 class BleConnectionInfo {
   const BleConnectionInfo({this.batteryLevel, this.gattName});
@@ -54,8 +77,10 @@ abstract interface class IBluetoothService {
   Future<void> turnOn();
 
   /// Every advertisement received while any owner is scanning.
+  /// Scan failures arrive as [BleScanException] errors.
   Stream<BleScanRecord> get scanRecords;
 
+  /// Throws [BleScanException] when the radio cannot start scanning.
   Future<void> startScan(String owner);
 
   Future<void> stopScan(String owner);

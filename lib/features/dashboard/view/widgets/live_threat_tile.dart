@@ -1,5 +1,7 @@
+import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/signal_strength.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:flutter/material.dart';
 
@@ -13,15 +15,10 @@ class LiveThreatTile extends StatelessWidget {
   final ScannedDeviceModel device;
   final VoidCallback onTrackTap;
 
-  Color _getSignalColor(int rssi) {
-    if (rssi > -60) return const Color(0xFF10B981);
-    if (rssi > -75) return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final color = _getSignalColor(device.rssi);
+    final colors = Theme.of(context).colorScheme;
+    final color = SignalStrength.color(device.rssi, colors);
 
     return Card(
       elevation: 1,
@@ -46,10 +43,10 @@ class LiveThreatTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          '${device.manufacturer} • MAC: ${device.id}',
+          '${device.rssi} dBm • ${device.manufacturer} • ${device.id}',
           style: TextStyle(
             fontSize: 10.sp,
-            color: Colors.grey.shade600,
+            color: colors.onSurfaceVariant,
             fontFamily: 'monospace',
           ),
           maxLines: 1,
@@ -58,7 +55,7 @@ class LiveThreatTile extends StatelessWidget {
         trailing: ElevatedButton.icon(
           onPressed: onTrackTap,
           icon: Icon(Icons.radar_rounded, size: 14.w),
-          label: Text('Track', style: TextStyle(fontSize: 10.sp)),
+          label: Text('track'.tr(), style: TextStyle(fontSize: 10.sp)),
           style: ElevatedButton.styleFrom(
             padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
             minimumSize: Size.zero,

@@ -82,6 +82,8 @@ flutter:
   # https://flutter.dev/to/resolution-aware-images
   assets:
     - assets/translations/
+    # Noto fonts (SIL OFL 1.1, see OFL-*.txt) used by the PDF report.
+    - assets/fonts/
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/to/asset-from-package
 

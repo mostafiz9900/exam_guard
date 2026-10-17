@@ -5,14 +5,21 @@ import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/repository/bluetooth_device_inspector.dart';
 
-/// One advertisement, already classified into a device.
-class DeviceSighting {
-  const DeviceSighting({required this.device, required this.hasAdvertisedName});
+/// What a device has advertised so far. Android delivers the advertisement
+/// and the scan response as separate packets, each carrying only part of the
+/// data, so classifying a single packet made names and categories flicker.
+class _AdvertisedProfile {
+  String name = '';
+  int? txPower;
+  final Map<int, List<int>> manufacturerData = {};
+  final Set<String> serviceUuids = {};
 
-  final ScannedDeviceModel device;
-
-  /// False when [ScannedDeviceModel.name] was inferred from the vendor.
-  final bool hasAdvertisedName;
+  void merge(BleScanRecord r) {
+    if (r.name.isNotEmpty) name = r.name;
+    txPower = r.txPower ?? txPower;
+    manufacturerData.addAll(r.manufacturerData);
+    serviceUuids.addAll(r.serviceUuids);
+  }
 }
 
 /// Live BLE device discovery for the wireless scanner.
@@ -21,8 +28,12 @@ class ScannerRepository {
 
   static const String _scanOwner = 'wireless_scanner';
 
+  /// Rotating random addresses make new ids all the time; cap the cache.
+  static const int _maxProfiles = 1000;
+
   final IBluetoothService _bluetooth;
   final IPermissionService _permissions;
+  final Map<String, _AdvertisedProfile> _profiles = {};
 
   Future<bool> isSupported() => _bluetooth.isSupported();
 
@@ -34,66 +45,51 @@ class ScannerRepository {
   Future<AppPermissionStatus> requestPermissions() =>
       _permissions.requestBluetoothScan();
 
+  /// Throws [BleScanException] when scanning cannot start.
   Future<void> startScan() => _bluetooth.startScan(_scanOwner);
 
   Future<void> stopScan() => _bluetooth.stopScan(_scanOwner);
 
-  /// Every advertisement received while scanning, classified.
-  Stream<DeviceSighting> sightings() => _bluetooth.scanRecords.map(_classify);
+  /// Every advertisement received while scanning, classified using
+  /// everything the device has advertised so far. Errors are
+  /// [BleScanException]s.
+  Stream<ScannedDeviceModel> sightings() =>
+      _bluetooth.scanRecords.map(_classify);
 
   Future<BleConnectionInfo> connect(String deviceId) =>
       _bluetooth.connect(deviceId);
 
   Future<void> disconnect(String deviceId) => _bluetooth.disconnect(deviceId);
 
-  DeviceSighting _classify(BleScanRecord record) {
+  ScannedDeviceModel _classify(BleScanRecord record) {
+    if (_profiles.length >= _maxProfiles && !_profiles.containsKey(record.id)) {
+      _profiles.clear();
+    }
+    final profile = _profiles.putIfAbsent(record.id, _AdvertisedProfile.new)
+      ..merge(record);
+    final serviceUuids = profile.serviceUuids.toList();
+
     final manufacturer = BluetoothDeviceInspector.resolveManufacturer(
       record.id,
-      record.manufacturerData,
+      profile.manufacturerData,
     );
-    final deviceType = BluetoothDeviceInspector.resolveDeviceType(
-      record.name,
-      manufacturer,
-      record.serviceUuids,
-    );
-    final hasName = record.name.isNotEmpty;
-    return DeviceSighting(
-      hasAdvertisedName: hasName,
-      device: ScannedDeviceModel(
-        id: record.id,
-        name: hasName
-            ? record.name
-            : _inferDeviceName(manufacturer, deviceType, record.id),
-        manufacturer: manufacturer,
-        deviceType: deviceType,
-        rssi: record.rssi,
-        txPower: record.txPower,
-        isConnectable: record.isConnectable,
-        serviceUuids: record.serviceUuids,
-        lastSeen: record.timestamp,
-        firstSeen: record.timestamp,
+    return ScannedDeviceModel(
+      id: record.id,
+      name: profile.name,
+      manufacturer: manufacturer,
+      deviceType: BluetoothDeviceInspector.resolveDeviceType(
+        profile.name,
+        manufacturer,
+        serviceUuids,
+        profile.manufacturerData,
       ),
+      rssi: record.rssi,
+      txPower: profile.txPower,
+      isConnectable: record.isConnectable,
+      serviceUuids: serviceUuids,
+      lastSeen: record.timestamp,
+      firstSeen: record.timestamp,
     );
-  }
-
-  String _inferDeviceName(String manufacturer, String deviceType, String mac) {
-    final macSuffix = mac.length >= 5 ? mac.substring(mac.length - 5) : mac;
-
-    if (manufacturer.contains('Apple')) {
-      return 'Apple Device ($macSuffix)';
-    } else if (manufacturer.contains('Samsung')) {
-      return 'Samsung Device ($macSuffix)';
-    } else if (manufacturer.contains('Espressif')) {
-      return 'ESP32 Module ($macSuffix)';
-    } else if (manufacturer.contains('Sony') || manufacturer.contains('Bose')) {
-      return '$manufacturer Headset ($macSuffix)';
-    } else if (deviceType.contains('Audio')) {
-      return 'Wireless Earpiece ($macSuffix)';
-    } else if (deviceType.contains('Wearable')) {
-      return 'Smartband / Watch ($macSuffix)';
-    } else {
-      return 'BLE Device ($macSuffix)';
-    }
   }
 }
 

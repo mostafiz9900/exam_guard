@@ -3,13 +3,14 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-/// Geiger Counter Audio Buzzer Service
-/// Emits audio pulses with frequency accelerating as inspector gets closer to threat (< 1.5m).
+/// Geiger-counter style buzzer: clicks (with a light haptic) at an interval
+/// that shortens as the target gets closer. Silent beyond 6 m.
 class GeigerBuzzerService {
   GeigerBuzzerService._();
   static final GeigerBuzzerService instance = GeigerBuzzerService._();
 
   Timer? _beepTimer;
+  Duration _interval = const Duration(seconds: 1);
   bool _isEnabled = true;
 
   bool get isEnabled => _isEnabled;
@@ -30,26 +31,27 @@ class GeigerBuzzerService {
       return;
     }
 
-    // Compute interval in milliseconds:
-    // Distance <= 1.0m  => 120ms (Rapid Geiger Beeping)
-    // Distance ~ 1.8m   => 250ms
-    // Distance ~ 3.5m   => 600ms
-    // Distance ~ 5.0m   => 1000ms
+    // Interval = distance / 5 m × 880 ms + 120 ms, clamped to 120–1000 ms:
+    // 0 m => 120 ms, 1 m => ~296 ms, 2 m => ~472 ms,
+    // 3.5 m => ~736 ms, 5 m and beyond (up to 6 m) => 1000 ms.
     final intervalMs = ((distanceMeters / 5.0) * 880 + 120)
         .clamp(120, 1000)
         .toInt();
 
-    _startGeigerLoop(Duration(milliseconds: intervalMs));
+    _interval = Duration(milliseconds: intervalMs);
+    // Callers update many times per second; restarting the timer on each
+    // update would starve it, so a running loop just picks up the new rate.
+    _beepTimer ??= Timer(_interval, _beep);
   }
 
-  void _startGeigerLoop(Duration interval) {
-    _beepTimer?.cancel();
-    _beepTimer = Timer.periodic(interval, (_) {
-      if (_isEnabled) {
-        SystemSound.play(SystemSoundType.click);
-        HapticFeedback.lightImpact();
-      }
-    });
+  void _beep() {
+    if (!_isEnabled) {
+      _beepTimer = null;
+      return;
+    }
+    SystemSound.play(SystemSoundType.click);
+    HapticFeedback.lightImpact();
+    _beepTimer = Timer(_interval, _beep);
   }
 
   void stopBuzzer() {

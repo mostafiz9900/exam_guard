@@ -45,7 +45,7 @@ class GuideStepTile extends StatelessWidget {
                 description,
                 style: TextStyle(
                   fontSize: 11.sp,
-                  color: Colors.grey.shade700,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   height: 1.3,
                 ),
               ),

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view/widgets/multi_target_radar_painter.dart';
@@ -67,7 +68,7 @@ class MultiTargetRadarChartWidget extends StatelessWidget {
 
             // Quick Target Selection Chips Row for 1-Tap Tracking
             Text(
-              'Tap Target below or click Red Dot on Radar Map:',
+              'scan_radar_tap_hint'.tr(),
               style: Theme.of(context).textTheme.labelSmall
                   ?.copyWith(fontSize: 10.sp, color: Colors.grey),
             ),

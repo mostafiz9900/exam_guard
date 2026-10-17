@@ -1,70 +1,75 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
-import 'package:exam_guard/features/radar/model/radar_levels.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+/// Distance-only radar: rings are drawn on a linear metre scale and the
+/// target is drawn as a ring at its estimated distance. RSSI carries no
+/// bearing, so nothing on this view implies a direction.
 class RadarPainter extends CustomPainter {
   RadarPainter({
     required this.sweepAngle,
-    required this.rssi,
     required this.distanceMeters,
-    required this.threatColor,
-    required this.trend,
+    required this.color,
+    required this.badgeLabel,
+    required this.gridColor,
+    required this.labelColor,
+    required this.badgeTextColor,
+    required this.ringLabels,
+    required this.note,
+    required this.textDirection,
   });
 
+  /// Outermost ring, in metres. Targets further away sit on this ring.
+  static const double maxMeters = 8.0;
+  static const List<double> ringMeters = [1.5, 3.5, 6.0, maxMeters];
+
   final double sweepAngle;
-  final int rssi;
-  final double distanceMeters;
-  final Color threatColor;
-  final ProximityTrend trend;
+
+  /// Null while acquiring / no live signal: no target ring is drawn.
+  final double? distanceMeters;
+  final Color color;
+  final String? badgeLabel;
+  final Color gridColor;
+  final Color labelColor;
+  final Color badgeTextColor;
+
+  /// Already-translated label for each of [ringMeters], in the same order.
+  final List<String> ringLabels;
+
+  /// Already-translated honesty note shown at the bottom edge.
+  final String note;
+  final TextDirection textDirection;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final maxRadius = math.min(size.width, size.height) / 2;
+    double radiusFor(double meters) =>
+        maxRadius * (meters.clamp(0.0, maxMeters) / maxMeters);
 
     final ringPaint = Paint()
-      ..color = Colors.teal.withValues(alpha: 0.3)
+      ..color = gridColor.withValues(alpha: 0.35)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
     final gridPaint = Paint()
-      ..color = Colors.teal.withValues(alpha: 0.15)
+      ..color = gridColor.withValues(alpha: 0.15)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
-    // Draw concentric radar rings
-    final radii = [
-      maxRadius * 0.25,
-      maxRadius * 0.50,
-      maxRadius * 0.75,
-      maxRadius,
-    ];
-
-    final distanceLabels = ['1.5m', '3.0m', '4.5m', '6.0m+'];
-
-    for (int i = 0; i < radii.length; i++) {
-      final r = radii[i];
+    for (var i = 0; i < ringMeters.length; i++) {
+      final r = radiusFor(ringMeters[i]);
       canvas.drawCircle(center, r, ringPaint);
-
-      // Draw Distance Meter Labels on the radar map axis
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: distanceLabels[i],
-          style: TextStyle(
-            color: Colors.teal.shade700,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: ui.TextDirection.ltr,
+      if (i >= ringLabels.length) continue;
+      _paintText(
+        canvas,
+        ringLabels[i],
+        Offset(center.dx + 4, center.dy - r + 2),
+        TextStyle(color: labelColor, fontSize: 10, fontWeight: FontWeight.bold),
       );
-      textPainter.layout();
-      textPainter.paint(canvas, Offset(center.dx + 4, center.dy - r - 12));
     }
 
-    // Draw crosshair axes
     canvas.drawLine(
       Offset(center.dx - maxRadius, center.dy),
       Offset(center.dx + maxRadius, center.dy),
@@ -76,18 +81,14 @@ class RadarPainter extends CustomPainter {
       gridPaint,
     );
 
-    // Draw rotating radar sweep gradient arc
+    // Decorative "listening" sweep; it does not indicate a bearing.
     final sweepPaint = Paint()
       ..shader = SweepGradient(
         center: Alignment.center,
         startAngle: 0.0,
         endAngle: math.pi / 2,
-        colors: [
-          threatColor.withValues(alpha: 0.4),
-          threatColor.withValues(alpha: 0.0),
-        ],
+        colors: [color.withValues(alpha: 0.25), color.withValues(alpha: 0.0)],
       ).createShader(Rect.fromCircle(center: center, radius: maxRadius));
-
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(sweepAngle);
@@ -100,78 +101,91 @@ class RadarPainter extends CustomPainter {
     );
     canvas.restore();
 
-    // 5. Draw Dynamic Animated Red Target Dot & Tracking Laser Line
-    final blipRatio = ((rssi + 100).clamp(0, 70) / 70.0).clamp(0.1, 0.9);
-    final blipDistance = maxRadius * (1.0 - blipRatio);
+    // Target: a ring at the estimated distance (no direction known).
+    final distance = distanceMeters;
+    if (distance != null) {
+      final r = math.max(radiusFor(distance), 6.0);
+      canvas.drawCircle(
+        center,
+        r,
+        Paint()
+          ..color = color.withValues(alpha: 0.18)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 14,
+      );
+      canvas.drawCircle(
+        center,
+        r,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3,
+      );
 
-    // Dynamically sweep blip position along with radar beam
-    final blipAngle = sweepAngle - 0.35;
-    final blipX = center.dx + blipDistance * math.cos(blipAngle);
-    final blipY = center.dy + blipDistance * math.sin(blipAngle);
+      final badge = badgeLabel;
+      if (badge != null) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: ' $badge ',
+            style: TextStyle(
+              color: badgeTextColor,
+              backgroundColor: color,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: textDirection,
+          maxLines: 1,
+          ellipsis: '…',
+        )..layout(maxWidth: size.width);
+        final dx = (center.dx - painter.width / 2)
+            .clamp(0.0, math.max(0.0, size.width - painter.width))
+            .toDouble();
+        final dy = (center.dy - r - painter.height - 4)
+            .clamp(0.0, math.max(0.0, size.height - painter.height))
+            .toDouble();
+        painter.paint(canvas, Offset(dx, dy));
+      }
+    }
 
-    final redColor = threatColor;
-
-    // Draw animated connecting laser line from center to red target dot
-    canvas.drawLine(
-      center,
-      Offset(blipX, blipY),
-      Paint()
-        ..color = redColor.withValues(alpha: 0.6)
-        ..strokeWidth = 2.0,
-    );
-
-    // Outer pulsing red glow rings
-    canvas.drawCircle(
-      Offset(blipX, blipY),
-      22.0,
-      Paint()
-        ..color = redColor.withValues(alpha: 0.2)
-        ..style = PaintingStyle.fill,
-    );
-
-    canvas.drawCircle(
-      Offset(blipX, blipY),
-      14.0,
-      Paint()
-        ..color = redColor.withValues(alpha: 0.4)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0,
-    );
-
-    // Solid Inner Red Dot
-    canvas.drawCircle(
-      Offset(blipX, blipY),
-      8.0,
-      Paint()
-        ..color = redColor
-        ..style = PaintingStyle.fill,
-    );
-
-    // Center White Pin-point Dot
-    canvas.drawCircle(Offset(blipX, blipY), 3.0, Paint()..color = Colors.white);
-
-    // Prominent Red Target Distance Badge
-    final blipTextPainter = TextPainter(
+    // Honesty note at the bottom edge.
+    final notePainter = TextPainter(
       text: TextSpan(
-        text: ' 🔴 TARGET THREAT (${distanceMeters}m) ',
-        style: const TextStyle(
-          color: Colors.white,
-          backgroundColor: Color(0xFFEF4444),
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
+        text: note,
+        style: TextStyle(color: labelColor, fontSize: 9),
       ),
-      textDirection: ui.TextDirection.ltr,
+      textDirection: textDirection,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: size.width);
+    notePainter.paint(
+      canvas,
+      Offset(
+        (size.width - notePainter.width) / 2,
+        math.max(0.0, size.height - notePainter.height),
+      ),
     );
-    blipTextPainter.layout();
-    blipTextPainter.paint(canvas, Offset(blipX + 12, blipY - 12));
+  }
+
+  void _paintText(Canvas canvas, String text, Offset offset, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: textDirection,
+    )..layout();
+    painter.paint(canvas, offset);
   }
 
   @override
   bool shouldRepaint(covariant RadarPainter oldDelegate) {
     return oldDelegate.sweepAngle != sweepAngle ||
-        oldDelegate.rssi != rssi ||
         oldDelegate.distanceMeters != distanceMeters ||
-        oldDelegate.trend != trend;
+        oldDelegate.color != color ||
+        oldDelegate.badgeLabel != badgeLabel ||
+        oldDelegate.gridColor != gridColor ||
+        oldDelegate.labelColor != labelColor ||
+        oldDelegate.badgeTextColor != badgeTextColor ||
+        oldDelegate.note != note ||
+        oldDelegate.textDirection != textDirection ||
+        !listEquals(oldDelegate.ringLabels, ringLabels);
   }
 }

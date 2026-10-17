@@ -32,17 +32,38 @@ class ReportSummaryScreen extends ConsumerWidget {
     }
   }
 
+  /// Global rect of the tapped widget, used to anchor the iPad share popover.
+  static Rect? _originOf(BuildContext context) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  static String _severityLabel(LogSeverity severity) => switch (severity) {
+    LogSeverity.critical => 'report_severity_critical'.tr(),
+    LogSeverity.high => 'report_severity_high'.tr(),
+    LogSeverity.medium => 'report_severity_medium'.tr(),
+    LogSeverity.low => 'report_severity_low'.tr(),
+  };
+
+  static String _orDash(String? value) =>
+      value == null || value.trim().isEmpty ? '-' : value;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).colorScheme;
     final session = ref.watch(sessionViewModelProvider);
     final logs = session?.deviceLogs ?? const <ActionLogModel>[];
     final reportState = ref.watch(reportViewModelProvider);
 
     ref.listen(reportViewModelProvider, (previous, next) {
-      final message = next.message;
-      if (message != null && message != previous?.message) {
+      final messageKey = next.messageKey;
+      if (messageKey != null && messageKey != previous?.messageKey) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text(messageKey.tr()),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     });
@@ -58,14 +79,16 @@ class ReportSummaryScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text('report_summary'.tr()),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.share_rounded),
-            tooltip: 'Export PDF Report',
-            onPressed: session == null
-                ? null
-                : () => ref
-                      .read(reportViewModelProvider.notifier)
-                      .exportPdf(session),
+          Builder(
+            builder: (buttonContext) => IconButton(
+              icon: const Icon(Icons.share_rounded),
+              tooltip: 'report_export_tooltip'.tr(),
+              onPressed: session == null
+                  ? null
+                  : () => ref
+                        .read(reportViewModelProvider.notifier)
+                        .exportPdf(session, origin: _originOf(buttonContext)),
+            ),
           ),
           const AppSettingsMenu(),
         ],
@@ -102,7 +125,9 @@ class ReportSummaryScreen extends ConsumerWidget {
                               SizedBox(width: 8.w),
                               Expanded(
                                 child: Text(
-                                  session?.instituteName ?? 'No session',
+                                  session == null
+                                      ? 'report_no_session'.tr()
+                                      : _orDash(session.instituteName),
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(fontWeight: FontWeight.bold),
                                 ),
@@ -118,8 +143,8 @@ class ReportSummaryScreen extends ConsumerWidget {
                                 ),
                                 child: Text(
                                   hasViolations
-                                      ? 'VIOLATIONS FOUND'
-                                      : 'NO MAJOR VIOLATIONS',
+                                      ? 'report_status_violations'.tr()
+                                      : 'report_status_clear'.tr(),
                                   style: Theme.of(context).textTheme.labelSmall
                                       ?.copyWith(
                                         color: statusColor,
@@ -130,20 +155,41 @@ class ReportSummaryScreen extends ConsumerWidget {
                             ],
                           ),
                           const Divider(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            spacing: AppDimens.spacingLarge,
+                            runSpacing: AppDimens.spacingSmall,
                             children: [
                               MetaInfo(
-                                label: 'Room Number',
-                                value: session?.roomNumber ?? '-',
+                                label: 'room_number'.tr(),
+                                value: _orDash(session?.roomNumber),
                               ),
                               MetaInfo(
-                                label: 'Inspector',
-                                value: session?.teacherName ?? '-',
+                                label: 'report_inspector'.tr(),
+                                value: _orDash(session?.teacherName),
                               ),
                               MetaInfo(
-                                label: 'Total Logs',
-                                value: '${logs.length} Incidents',
+                                label: 'report_started'.tr(),
+                                value: session == null
+                                    ? '-'
+                                    : AppDateFormat.shortDateTime(
+                                        session.startTime,
+                                      ),
+                              ),
+                              MetaInfo(
+                                label: 'report_ended'.tr(),
+                                value: session == null
+                                    ? '-'
+                                    : session.endTime == null
+                                    ? 'report_in_progress'.tr()
+                                    : AppDateFormat.shortDateTime(
+                                        session.endTime!,
+                                      ),
+                              ),
+                              MetaInfo(
+                                label: 'report_duration'.tr(),
+                                value: session == null
+                                    ? '-'
+                                    : AppDateFormat.duration(session.duration),
                               ),
                             ],
                           ),
@@ -158,27 +204,27 @@ class ReportSummaryScreen extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: MetricCard(
-                          title: 'Critical Violations',
+                          title: 'report_critical_violations'.tr(),
                           count: '$criticalCount',
-                          color: const Color(0xFFEF4444),
+                          color: _getSeverityColor(LogSeverity.critical),
                           icon: Icons.error_outline_rounded,
                         ),
                       ),
                       SizedBox(width: AppDimens.spacingSmall),
                       Expanded(
                         child: MetricCard(
-                          title: 'High Threats',
+                          title: 'report_high_threats'.tr(),
                           count: '$highCount',
-                          color: const Color(0xFFF97316),
+                          color: _getSeverityColor(LogSeverity.high),
                           icon: Icons.warning_amber_rounded,
                         ),
                       ),
                       SizedBox(width: AppDimens.spacingSmall),
                       Expanded(
                         child: MetricCard(
-                          title: 'Total Logged',
+                          title: 'report_total_logged'.tr(),
                           count: '${logs.length}',
-                          color: Theme.of(context).colorScheme.primary,
+                          color: colors.primary,
                           icon: Icons.assignment_turned_in_rounded,
                         ),
                       ),
@@ -187,7 +233,9 @@ class ReportSummaryScreen extends ConsumerWidget {
                   SizedBox(height: AppDimens.spacingLarge),
 
                   Text(
-                    'Incident Audit Logs (${logs.length})',
+                    'report_incident_logs'.tr(
+                      args: {'count': '${logs.length}'},
+                    ),
                     style: Theme.of(context).textTheme.titleSmall
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
@@ -209,16 +257,18 @@ class ReportSummaryScreen extends ConsumerWidget {
                                 ),
                                 SizedBox(height: 8.h),
                                 Text(
-                                  'No Incidents Logged',
+                                  'report_empty_title'.tr(),
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(fontWeight: FontWeight.bold),
                                 ),
                                 SizedBox(height: 4.h),
                                 Text(
-                                  'Exam session conducted smoothly with zero reported violations.',
+                                  'report_empty_message'.tr(),
                                   textAlign: TextAlign.center,
                                   style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: Colors.grey),
+                                      ?.copyWith(
+                                        color: colors.onSurfaceVariant,
+                                      ),
                                 ),
                               ],
                             ),
@@ -282,7 +332,7 @@ class ReportSummaryScreen extends ConsumerWidget {
                                         ),
                                       ),
                                       child: Text(
-                                        log.severity.code,
+                                        _severityLabel(log.severity),
                                         style: Theme.of(context)
                                             .textTheme
                                             .labelSmall
@@ -299,18 +349,28 @@ class ReportSummaryScreen extends ConsumerWidget {
                                   children: [
                                     SizedBox(height: 4.h),
                                     Text(
-                                      'Location: ${log.location.isEmpty ? 'Desk N/A' : log.location} • MAC: ${log.deviceId}',
+                                      'report_log_details'.tr(
+                                        args: {
+                                          'location':
+                                              log.location.trim().isEmpty
+                                              ? 'report_not_recorded'.tr()
+                                              : log.location,
+                                          'id': _orDash(log.deviceId),
+                                        },
+                                      ),
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
                                           ?.copyWith(
-                                            color: Colors.grey.shade700,
+                                            color: colors.onSurfaceVariant,
                                           ),
                                     ),
                                     if (log.notes.isNotEmpty) ...[
                                       SizedBox(height: 2.h),
                                       Text(
-                                        'Note: ${log.notes}',
+                                        'report_note'.tr(
+                                          args: {'note': log.notes},
+                                        ),
                                         style: Theme.of(context)
                                             .textTheme
                                             .bodySmall
@@ -327,7 +387,9 @@ class ReportSummaryScreen extends ConsumerWidget {
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
-                                          ?.copyWith(color: Colors.grey),
+                                          ?.copyWith(
+                                            color: colors.onSurfaceVariant,
+                                          ),
                                     ),
                                   ],
                                 ),
@@ -337,27 +399,32 @@ class ReportSummaryScreen extends ConsumerWidget {
                         ),
                   SizedBox(height: AppDimens.spacingLarge),
 
-                  PrimaryButton(
-                    label: 'Export & Share PDF Report',
-                    isLoading: reportState.isExporting,
-                    onPressed: session == null
-                        ? null
-                        : () => ref
-                              .read(reportViewModelProvider.notifier)
-                              .exportPdf(session),
+                  Builder(
+                    builder: (buttonContext) => PrimaryButton(
+                      label: 'report_export_share'.tr(),
+                      isLoading: reportState.isExporting,
+                      onPressed: session == null
+                          ? null
+                          : () => ref
+                                .read(reportViewModelProvider.notifier)
+                                .exportPdf(
+                                  session,
+                                  origin: _originOf(buttonContext),
+                                ),
+                    ),
                   ),
                   SizedBox(height: AppDimens.spacingMedium),
                   if (session?.endTime == null)
                     OutlinedButton.icon(
                       onPressed: () => context.pushTo(AppRoute.actionNew),
                       icon: const Icon(Icons.add_rounded),
-                      label: const Text('Create New Incident Entry'),
+                      label: Text('report_new_incident'.tr()),
                     )
                   else
                     OutlinedButton.icon(
                       onPressed: () => context.goTo(AppRoute.sessionSetup),
                       icon: const Icon(Icons.play_arrow_rounded),
-                      label: const Text('Start New Exam Session'),
+                      label: Text('report_new_session'.tr()),
                     ),
                 ],
               ),

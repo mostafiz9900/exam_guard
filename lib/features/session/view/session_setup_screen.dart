@@ -28,9 +28,26 @@ class SessionSetupScreen extends HookConsumerWidget {
     final animController = useAnimationController(
       duration: const Duration(milliseconds: 800),
     );
-    final fadeAnimation = useAnimation(
-      CurvedAnimation(parent: animController, curve: Curves.easeOut),
+    // Created once and disposed with the screen (a CurvedAnimation per build
+    // would leak a listener on the controller every frame).
+    final fadeAnimation = useMemoized(
+      () => CurvedAnimation(parent: animController, curve: Curves.easeOut),
+      [animController],
     );
+    useEffect(() => fadeAnimation.dispose, [fadeAnimation]);
+
+    // Rebuild when the session changes so the "last report" button stays
+    // in sync (e.g. after returning from an ended exam's report).
+    ref.watch(sessionViewModelProvider);
+    final lastSession = ref.read(sessionViewModelProvider.notifier).lastSession;
+    final canViewLastReport = lastSession != null && !lastSession.isActive;
+
+    void viewLastReport() {
+      final opened = ref
+          .read(sessionViewModelProvider.notifier)
+          .openLastSession();
+      if (opened) context.goTo(AppRoute.report);
+    }
 
     useEffect(() {
       animController.forward();
@@ -116,7 +133,7 @@ class SessionSetupScreen extends HookConsumerWidget {
           // Main Content
           SafeArea(
             child: FadeTransition(
-              opacity: AlwaysStoppedAnimation(fadeAnimation),
+              opacity: fadeAnimation,
               child: Center(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
@@ -228,6 +245,23 @@ class SessionSetupScreen extends HookConsumerWidget {
                                       onPressed: startSession,
                                     ),
                                   ),
+                                  if (canViewLastReport) ...[
+                                    SizedBox(height: AppDimens.spacingMedium),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: viewLastReport,
+                                        icon: const Icon(
+                                          Icons.description_outlined,
+                                        ),
+                                        label: Text(
+                                          'view_last_report'.tr(),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

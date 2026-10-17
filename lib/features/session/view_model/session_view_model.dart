@@ -56,8 +56,14 @@ class SessionViewModel extends Notifier<SessionModel?> {
     return ended;
   }
 
-  /// Shows the last exam's report (read-only).
-  void openLastSession() => state = _repository.lastSession();
+  /// Shows the last exam's report (read-only). Returns false when there is
+  /// no saved exam to show, leaving the current state untouched.
+  bool openLastSession() {
+    final last = _repository.lastSession();
+    if (last == null) return false;
+    state = last;
+    return true;
+  }
 
   /// Clears an ended session so a new exam can be set up.
   void closeEndedSession() {

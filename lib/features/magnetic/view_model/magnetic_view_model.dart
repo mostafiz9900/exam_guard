@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/services/audio/geiger_buzzer_service.dart';
 import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';
 import 'package:exam_guard/features/magnetic/repository/magnetic_repository.dart';
@@ -20,7 +20,15 @@ class MagneticState {
   final MagneticSensitivity sensitivity;
   final List<double> history;
   final MagneticHazardLevel hazardLevel;
-  final String? errorMessage;
+
+  /// Translation key of the reason the sensor is unavailable.
+  final String? errorKey;
+
+  /// False while the baseline is only the automatic first reading.
+  final bool isBaselineCalibrated;
+
+  /// Highest hazard level seen since the last calibration.
+  final MagneticHazardLevel peakHazard;
 
   const MagneticState({
     this.magnitude = 0,
@@ -32,13 +40,18 @@ class MagneticState {
     this.isScanning = false,
     this.isHardwareSensorActive = false,
     this.isBuzzerEnabled = true,
-    this.sensitivity = MagneticSensitivity.balanced,
+    this.sensitivity = MagneticSensitivity.medium,
     this.history = const [],
     this.hazardLevel = MagneticHazardLevel.normal,
-    this.errorMessage,
+    this.errorKey,
+    this.isBaselineCalibrated = false,
+    this.peakHazard = MagneticHazardLevel.normal,
   });
 
   bool get hasReading => isHardwareSensorActive;
+
+  /// Readings are real only while the sensor is running and delivering.
+  bool get isLive => isScanning && isHardwareSensorActive && errorKey == null;
 
   MagneticState copyWith({
     double? magnitude,
@@ -53,7 +66,9 @@ class MagneticState {
     MagneticSensitivity? sensitivity,
     List<double>? history,
     MagneticHazardLevel? hazardLevel,
-    String? Function()? errorMessage,
+    String? Function()? errorKey,
+    bool? isBaselineCalibrated,
+    MagneticHazardLevel? peakHazard,
   }) {
     return MagneticState(
       magnitude: magnitude ?? this.magnitude,
@@ -69,23 +84,31 @@ class MagneticState {
       sensitivity: sensitivity ?? this.sensitivity,
       history: history ?? this.history,
       hazardLevel: hazardLevel ?? this.hazardLevel,
-      errorMessage: errorMessage != null ? errorMessage() : this.errorMessage,
+      errorKey: errorKey != null ? errorKey() : this.errorKey,
+      isBaselineCalibrated: isBaselineCalibrated ?? this.isBaselineCalibrated,
+      peakHazard: peakHazard ?? this.peakHazard,
     );
   }
 
+  /// Total field above this (μT) is a strong source whatever the baseline;
+  /// Earth's field is only 25–65 μT.
+  static const double strongSourceMagnitude = 200.0;
+
+  /// All levels come from the change from [baseline]:
+  /// elevated > T, critical > 2T, strong source > 4T (T = preset threshold).
   static MagneticHazardLevel calculateHazard(
     double magnitude,
     double baseline,
     MagneticSensitivity sensitivity,
   ) {
     final delta = (magnitude - baseline).abs();
-    final limit = sensitivity.threshold;
+    final t = sensitivity.threshold;
 
-    if (magnitude > 120.0 || delta > 60.0) {
+    if (delta > 4 * t || magnitude > strongSourceMagnitude) {
       return MagneticHazardLevel.strongSource;
-    } else if (delta > (limit - baseline + 30) || magnitude > 90.0) {
+    } else if (delta > 2 * t) {
       return MagneticHazardLevel.critical;
-    } else if (delta > (limit - baseline) || magnitude > limit) {
+    } else if (delta > t) {
       return MagneticHazardLevel.elevated;
     } else {
       return MagneticHazardLevel.normal;
@@ -95,25 +118,53 @@ class MagneticState {
 
 /// Live magnetometer reader. Uses only the phone's real sensor.
 class MagneticViewModel extends Notifier<MagneticState> {
+  static const String noSensorErrorKey = 'mag_err_no_sensor';
   static const Duration _noSensorTimeout = Duration(seconds: 2);
   static const int _historyLength = 16;
 
-  /// The sensor streams at ~50 Hz; publish to the UI at ~10 Hz.
+  /// The sensor streams at ~50 Hz; publish to the UI at ~10 Hz. Every
+  /// sample still updates peak/hazard, and each publish shows the strongest
+  /// sample since the last one so quick passes are not missed.
   static const Duration _uiInterval = Duration(milliseconds: 100);
 
   late MagneticRepository _repository;
   late AppLogger _logger;
+  late GeigerBuzzerService _buzzer;
+
+  /// Beeps only while the magnetic screen is open, so the dashboard's
+  /// background monitoring stays silent.
+  bool _isScreenVisible = false;
+
+  /// True while another screen (e.g. the incident form) covers this one.
+  bool _alertsSuspended = false;
 
   StreamSubscription<MagneticSample>? _subscription;
   Timer? _noSensorTimer;
+  Timer? _publishTimer;
   DateTime _lastPublish = DateTime.fromMillisecondsSinceEpoch(0);
   bool _hasBaseline = false;
+
+  /// Latest raw sample (rounded magnitude), whether published or not.
+  double? _latestMagnitude;
+
+  double _peak = 0;
+  MagneticHazardLevel _peakHazard = MagneticHazardLevel.normal;
+
+  /// Strongest sample (largest change from baseline) since the last publish.
+  MagneticSample? _pending;
+  double _pendingMagnitude = 0;
+  double _pendingDelta = -1;
+  MagneticHazardLevel _pendingHazard = MagneticHazardLevel.normal;
 
   @override
   MagneticState build() {
     _repository = ref.watch(magneticRepositoryProvider);
     _logger = ref.watch(appLoggerProvider);
-    ref.onDispose(_cancel);
+    _buzzer = ref.watch(geigerBuzzerProvider);
+    ref.onDispose(() {
+      _cancel();
+      if (_isScreenVisible) _buzzer.stopBuzzer();
+    });
     Future.microtask(startScanning);
     return const MagneticState();
   }
@@ -124,17 +175,73 @@ class MagneticViewModel extends Notifier<MagneticState> {
       state.baseline,
       s,
     );
-    state = state.copyWith(sensitivity: s, hazardLevel: hazard);
+    _peakHazard = hazard;
+    state = state.copyWith(
+      sensitivity: s,
+      hazardLevel: hazard,
+      peakHazard: hazard,
+    );
+    _updateBuzzer();
   }
 
   void toggleBuzzer() {
     state = state.copyWith(isBuzzerEnabled: !state.isBuzzerEnabled);
+    _updateBuzzer();
+  }
+
+  /// Called by the magnetic screen when it opens and closes.
+  void setScreenVisible(bool visible) {
+    _isScreenVisible = visible;
+    if (!ref.mounted) {
+      if (!visible) _buzzer.stopBuzzer();
+      return;
+    }
+    if (visible) {
+      _updateBuzzer();
+    } else {
+      _buzzer.stopBuzzer();
+    }
+  }
+
+  /// Silences the buzzer while another screen is on top (e.g. the incident
+  /// form) and resumes it afterwards.
+  void setAlertsSuspended(bool suspended) {
+    _alertsSuspended = suspended;
+    if (ref.mounted) {
+      _updateBuzzer();
+    } else if (suspended) {
+      _buzzer.stopBuzzer();
+    }
+  }
+
+  /// Beeps faster as the field anomaly gets stronger.
+  void _updateBuzzer() {
+    if (!_isScreenVisible) return;
+    final distance = !state.isBuzzerEnabled || _alertsSuspended || !state.isLive
+        ? null
+        : switch (state.hazardLevel) {
+            MagneticHazardLevel.normal => null,
+            MagneticHazardLevel.elevated => 4.0,
+            MagneticHazardLevel.critical => 2.0,
+            MagneticHazardLevel.strongSource => 0.5,
+          };
+    if (distance == null) {
+      _buzzer.stopBuzzer();
+    } else {
+      _buzzer.updateTargetDistance(distance);
+    }
   }
 
   void startScanning() {
     _cancel();
     if (!ref.mounted) return;
-    state = state.copyWith(isScanning: true, errorMessage: () => null);
+    _resetPending();
+    _lastPublish = DateTime.fromMillisecondsSinceEpoch(0);
+    state = state.copyWith(
+      isScanning: true,
+      isHardwareSensorActive: false,
+      errorKey: () => null,
+    );
 
     _subscription = _repository.samples().listen(
       _onReading,
@@ -153,42 +260,79 @@ class MagneticViewModel extends Notifier<MagneticState> {
     if (!ref.mounted) return;
     _noSensorTimer?.cancel();
 
-    final now = DateTime.now();
-    if (state.isHardwareSensorActive &&
-        now.difference(_lastPublish) < _uiInterval) {
-      return;
-    }
-    _lastPublish = now;
+    final rounded = _round(event.magnitude);
+    _latestMagnitude = rounded;
 
-    final rounded = double.parse(event.magnitude.toStringAsFixed(1));
-
-    // The first real reading becomes the ambient baseline.
+    // Until the user calibrates, the first real reading is the baseline.
     final baseline = _hasBaseline ? state.baseline : rounded;
     _hasBaseline = true;
 
-    final peak = math.max(state.peakValue, rounded);
     final hazard = MagneticState.calculateHazard(
       rounded,
       baseline,
       state.sensitivity,
     );
+    if (rounded > _peak) _peak = rounded;
+    if (hazard.index > _peakHazard.index) _peakHazard = hazard;
 
-    final history = [...state.history, rounded];
+    final delta = (rounded - baseline).abs();
+    if (_pending == null ||
+        hazard.index > _pendingHazard.index ||
+        (hazard == _pendingHazard && delta > _pendingDelta)) {
+      _pending = event;
+      _pendingMagnitude = rounded;
+      _pendingDelta = delta;
+      _pendingHazard = hazard;
+    }
+
+    final sinceLast = DateTime.now().difference(_lastPublish);
+    if (state.isHardwareSensorActive && sinceLast < _uiInterval) {
+      // Publish what is pending once the interval is up, even if the
+      // stream goes quiet, so a final spike is never lost.
+      _publishTimer ??= Timer(_uiInterval - sinceLast, () {
+        _publishTimer = null;
+        _publishPending(baseline);
+      });
+      return;
+    }
+    _publishPending(baseline);
+  }
+
+  void _publishPending(double baseline) {
+    final shown = _pending;
+    if (!ref.mounted || shown == null) return;
+    _publishTimer?.cancel();
+    _publishTimer = null;
+    _lastPublish = DateTime.now();
+
+    final history = [...state.history, _pendingMagnitude];
     if (history.length > _historyLength) history.removeAt(0);
 
     state = state.copyWith(
-      magnitude: rounded,
-      x: double.parse(event.x.toStringAsFixed(1)),
-      y: double.parse(event.y.toStringAsFixed(1)),
-      z: double.parse(event.z.toStringAsFixed(1)),
+      magnitude: _pendingMagnitude,
+      x: _round(shown.x),
+      y: _round(shown.y),
+      z: _round(shown.z),
       baseline: baseline,
-      peakValue: peak,
+      peakValue: _peak,
       history: history,
-      hazardLevel: hazard,
+      hazardLevel: _pendingHazard,
+      peakHazard: _peakHazard,
       isScanning: true,
       isHardwareSensorActive: true,
     );
+    _resetPending();
+    _updateBuzzer();
   }
+
+  void _resetPending() {
+    _pending = null;
+    _pendingMagnitude = 0;
+    _pendingDelta = -1;
+    _pendingHazard = MagneticHazardLevel.normal;
+  }
+
+  static double _round(double v) => double.parse(v.toStringAsFixed(1));
 
   void _markUnavailable() {
     if (!ref.mounted) return;
@@ -196,20 +340,54 @@ class MagneticViewModel extends Notifier<MagneticState> {
     state = state.copyWith(
       isScanning: false,
       isHardwareSensorActive: false,
-      errorMessage: () => 'This phone has no working magnetometer sensor.',
+      hazardLevel: MagneticHazardLevel.normal,
+      errorKey: () => noSensorErrorKey,
     );
+    _updateBuzzer();
   }
 
   void stopScanning() {
     _cancel();
-    state = state.copyWith(isScanning: false);
+    state = state.copyWith(
+      isScanning: false,
+      hazardLevel: MagneticHazardLevel.normal,
+    );
+    _updateBuzzer();
   }
 
-  void calibrateBaseline() {
+  /// Sets the current live field as the ambient baseline. Returns false
+  /// (and changes nothing) when the sensor is not delivering live readings.
+  bool calibrateBaseline() {
+    final current = _latestMagnitude;
+    if (!state.isLive || current == null) return false;
+    _hasBaseline = true;
+    _peak = current;
+    _peakHazard = MagneticHazardLevel.normal;
+    _resetPending();
     state = state.copyWith(
-      baseline: state.magnitude,
-      peakValue: state.magnitude,
+      magnitude: current,
+      baseline: current,
+      peakValue: current,
+      isBaselineCalibrated: true,
+      peakHazard: MagneticHazardLevel.normal,
+      hazardLevel: MagneticState.calculateHazard(
+        current,
+        current,
+        state.sensitivity,
+      ),
     );
+    _updateBuzzer();
+    return true;
+  }
+
+  /// Evidence for the incident form.
+  String incidentNotes() {
+    final baselineKind = state.isBaselineCalibrated ? 'calibrated' : 'auto';
+    final live = state.isLive ? '' : ' Sensor was not live when logged.';
+    return 'Magnetometer: peak ${state.peakValue.toStringAsFixed(1)} μT '
+        '(baseline ${state.baseline.toStringAsFixed(1)} μT $baselineKind, '
+        'highest level ${state.peakHazard.label}, '
+        '${state.sensitivity.chipLabel}).$live';
   }
 
   void _cancel() {
@@ -217,8 +395,14 @@ class MagneticViewModel extends Notifier<MagneticState> {
     _subscription = null;
     _noSensorTimer?.cancel();
     _noSensorTimer = null;
+    _publishTimer?.cancel();
+    _publishTimer = null;
   }
 }
 
+/// Auto-disposed so the sensor stops once the dashboard and magnetic
+/// screens are gone (e.g. after End Exam).
 final magneticViewModelProvider =
-    NotifierProvider<MagneticViewModel, MagneticState>(MagneticViewModel.new);
+    NotifierProvider.autoDispose<MagneticViewModel, MagneticState>(
+      MagneticViewModel.new,
+    );

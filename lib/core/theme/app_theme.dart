@@ -29,6 +29,7 @@ class AppTheme {
         seedColor: AppColors.primary,
         brightness: brightness,
         primary: AppColors.primary,
+        onPrimary: Colors.white,
         secondary: AppColors.secondary,
         surface: surface,
         onSurface: onSurface,
@@ -104,7 +105,7 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
-          minimumSize: Size(double.infinity, AppDimens.buttonHeight),
+          minimumSize: Size(0, AppDimens.buttonHeight),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppDimens.radiusLarge),
           ),

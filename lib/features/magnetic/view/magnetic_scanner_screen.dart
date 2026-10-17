@@ -1,12 +1,14 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
+import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/magnetic/view_model/magnetic_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
@@ -17,7 +19,7 @@ import 'package:exam_guard/features/magnetic/view/widgets/guide_step_item.dart';
 import 'package:exam_guard/features/magnetic/view/widgets/magnetic_gauge_painter.dart';
 import 'package:exam_guard/features/magnetic/view/widgets/stat_item.dart';
 
-class MagneticScannerScreen extends ConsumerWidget {
+class MagneticScannerScreen extends HookConsumerWidget {
   const MagneticScannerScreen({super.key});
 
   Color _getHazardColor(MagneticHazardLevel level) {
@@ -33,11 +35,86 @@ class MagneticScannerScreen extends ConsumerWidget {
     }
   }
 
+  static String _threshold(MagneticSensitivity s) =>
+      s.threshold.toStringAsFixed(0);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(magneticViewModelProvider);
     final notifier = ref.read(magneticViewModelProvider.notifier);
-    final hazardColor = _getHazardColor(state.hazardLevel);
+
+    // Audio alerts play only while this screen is open.
+    useEffect(() {
+      notifier.setScreenVisible(true);
+      return () => notifier.setScreenVisible(false);
+    }, [notifier]);
+    final colorScheme = Theme.of(context).colorScheme;
+    final secondaryText = colorScheme.onSurfaceVariant;
+    final isLive = state.isLive;
+    final isStopped = !state.isScanning || state.errorKey != null;
+    final hazardColor = isLive
+        ? _getHazardColor(state.hazardLevel)
+        : colorScheme.outline;
+
+    final String statusText;
+    final Color statusColor;
+    if (state.errorKey != null) {
+      statusText = 'mag_status_unavailable'.tr();
+      statusColor = colorScheme.error;
+    } else if (!state.isScanning) {
+      statusText = 'mag_status_paused'.tr();
+      statusColor = colorScheme.outline;
+    } else if (!state.isHardwareSensorActive) {
+      statusText = 'mag_status_waiting'.tr();
+      statusColor = colorScheme.outline;
+    } else {
+      statusText = 'mag_status_live'.tr();
+      statusColor = colorScheme.primary;
+    }
+
+    final String bannerTitle;
+    final String bannerText;
+    if (isLive) {
+      bannerTitle = state.hazardLevel.labelKey.tr();
+      bannerText = state.hazardLevel.suggestionKey.tr();
+    } else if (isStopped) {
+      bannerTitle = 'mag_not_measuring'.tr(
+        args: {'reason': (state.errorKey ?? 'mag_reason_paused').tr()},
+      );
+      bannerText = 'mag_not_measuring_text'.tr();
+    } else {
+      bannerTitle = 'mag_status_waiting'.tr();
+      bannerText = 'mag_waiting_text'.tr();
+    }
+
+    void calibrate() {
+      final ok = notifier.calibrateBaseline();
+      final latest = ref.read(magneticViewModelProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? 'mag_baseline_set'.tr(
+                    args: {'value': latest.baseline.toStringAsFixed(1)},
+                  )
+                : 'mag_not_calibrated'.tr(),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+
+    Future<void> logIncident() async {
+      notifier.setAlertsSuspended(true);
+      await context.pushTo(
+        AppRoute.actionNew,
+        extra: ActionEntryArgs(
+          category: 'Magnetic Anomaly',
+          notes: notifier.incidentNotes(),
+        ),
+      );
+      if (context.mounted) notifier.setAlertsSuspended(false);
+    }
 
     // Compute magnetic needle angle in radians
     final needleAngle = math.atan2(state.y, state.x);
@@ -58,7 +135,7 @@ class MagneticScannerScreen extends ConsumerWidget {
           actions: [
             IconButton(
               icon: Icon(Icons.help_outline_rounded, size: 24.w),
-              tooltip: 'User Guide & Instructions',
+              tooltip: 'mag_how_to_use'.tr(),
               onPressed: () => _showHowToUseModal(context),
             ),
             IconButton(
@@ -68,7 +145,7 @@ class MagneticScannerScreen extends ConsumerWidget {
                     : Icons.notifications_off_rounded,
                 size: 24.w,
               ),
-              tooltip: 'Toggle Audio Buzzer',
+              tooltip: 'mag_audio_tooltip'.tr(),
               onPressed: () => notifier.toggleBuzzer(),
             ),
             IconButton(
@@ -78,7 +155,7 @@ class MagneticScannerScreen extends ConsumerWidget {
                     : Icons.play_arrow_rounded,
                 size: 28.w,
               ),
-              tooltip: state.isScanning ? 'Pause Sensor' : 'Resume Sensor',
+              tooltip: (state.isScanning ? 'mag_pause' : 'mag_resume').tr(),
               onPressed: () {
                 if (state.isScanning) {
                   notifier.stopScanning();
@@ -103,28 +180,20 @@ class MagneticScannerScreen extends ConsumerWidget {
                     Row(
                       children: [
                         Icon(
-                          state.errorMessage != null
-                              ? Icons.sensors_off_rounded
-                              : Icons.sensors_rounded,
+                          isLive
+                              ? Icons.sensors_rounded
+                              : Icons.sensors_off_rounded,
                           size: 16.w,
-                          color: state.errorMessage != null
-                              ? Theme.of(context).colorScheme.error
-                              : Theme.of(context).colorScheme.primary,
+                          color: statusColor,
                         ),
                         SizedBox(width: 6.w),
                         Text(
-                          state.errorMessage != null
-                              ? 'SENSOR UNAVAILABLE'
-                              : (state.isHardwareSensorActive
-                                    ? 'MAGNETOMETER LIVE'
-                                    : 'WAITING FOR SENSOR…'),
+                          statusText,
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 1.1,
-                                color: state.errorMessage != null
-                                    ? Theme.of(context).colorScheme.error
-                                    : Theme.of(context).colorScheme.primary,
+                                color: statusColor,
                               ),
                         ),
                         const Spacer(),
@@ -156,7 +225,7 @@ class MagneticScannerScreen extends ConsumerWidget {
                                 ),
                                 SizedBox(width: 4.w),
                                 Text(
-                                  'How to Use',
+                                  'mag_how_to_use'.tr(),
                                   style: TextStyle(
                                     fontSize: 10.sp,
                                     fontWeight: FontWeight.bold,
@@ -189,9 +258,12 @@ class MagneticScannerScreen extends ConsumerWidget {
                       child: Row(
                         children: [
                           Icon(
-                            state.hazardLevel == MagneticHazardLevel.normal
-                                ? Icons.verified_user_rounded
-                                : Icons.warning_amber_rounded,
+                            !isLive
+                                ? Icons.sensors_off_rounded
+                                : (state.hazardLevel ==
+                                          MagneticHazardLevel.normal
+                                      ? Icons.verified_user_rounded
+                                      : Icons.warning_amber_rounded),
                             color: hazardColor,
                             size: 28.w,
                           ),
@@ -201,7 +273,7 @@ class MagneticScannerScreen extends ConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  state.hazardLevel.label,
+                                  bannerTitle,
                                   style: Theme.of(context).textTheme.titleSmall
                                       ?.copyWith(
                                         color: hazardColor,
@@ -210,13 +282,20 @@ class MagneticScannerScreen extends ConsumerWidget {
                                 ),
                                 SizedBox(height: 2.h),
                                 Text(
-                                  state.hazardLevel.suggestion,
+                                  bannerText,
                                   style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: Colors.grey.shade700),
+                                      ?.copyWith(color: secondaryText),
                                 ),
                               ],
                             ),
                           ),
+                          if (isStopped) ...[
+                            SizedBox(width: 8.w),
+                            OutlinedButton(
+                              onPressed: notifier.startScanning,
+                              child: Text('mag_retry'.tr()),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -235,11 +314,11 @@ class MagneticScannerScreen extends ConsumerWidget {
                         child: Column(
                           children: [
                             Text(
-                              'MAGNETIC INTENSITY GAUGE',
+                              'mag_gauge_title'.tr(),
                               style: Theme.of(context).textTheme.labelMedium
                                   ?.copyWith(
                                     letterSpacing: 1.2,
-                                    color: Colors.grey,
+                                    color: secondaryText,
                                   ),
                             ),
                             SizedBox(height: 16.h),
@@ -251,6 +330,7 @@ class MagneticScannerScreen extends ConsumerWidget {
                                 magnitude: state.magnitude,
                                 angle: needleAngle,
                                 color: hazardColor,
+                                trackColor: colorScheme.surfaceContainerHighest,
                               ),
                               child: SizedBox(
                                 width: 180.w,
@@ -270,13 +350,13 @@ class MagneticScannerScreen extends ConsumerWidget {
                                             ),
                                       ),
                                       Text(
-                                        'μT (Microtesla)',
+                                        'mag_unit'.tr(),
                                         style: Theme.of(context)
                                             .textTheme
                                             .labelSmall
                                             ?.copyWith(
                                               fontSize: 10.sp,
-                                              color: Colors.grey.shade600,
+                                              color: secondaryText,
                                             ),
                                       ),
                                     ],
@@ -291,9 +371,9 @@ class MagneticScannerScreen extends ConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Live Field Fluctuations',
+                                  'mag_fluctuations'.tr(),
                                   style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(color: Colors.grey),
+                                      ?.copyWith(color: secondaryText),
                                 ),
                                 SizedBox(height: 6.h),
                                 SizedBox(
@@ -311,13 +391,15 @@ class MagneticScannerScreen extends ConsumerWidget {
                                         width: 14.w,
                                         height: 36.h * normalized,
                                         decoration: BoxDecoration(
-                                          color: _getHazardColor(
-                                            MagneticState.calculateHazard(
-                                              val,
-                                              state.baseline,
-                                              state.sensitivity,
-                                            ),
-                                          ),
+                                          color: isLive
+                                              ? _getHazardColor(
+                                                  MagneticState.calculateHazard(
+                                                    val,
+                                                    state.baseline,
+                                                    state.sensitivity,
+                                                  ),
+                                                )
+                                              : colorScheme.outline,
                                           borderRadius: BorderRadius.circular(
                                             4.r,
                                           ),
@@ -335,21 +417,36 @@ class MagneticScannerScreen extends ConsumerWidget {
                               mainAxisAlignment: MainAxisAlignment.spaceAround,
                               children: [
                                 StatItem(
-                                  label: 'Baseline',
+                                  label:
+                                      (state.isBaselineCalibrated
+                                              ? 'mag_baseline'
+                                              : 'mag_baseline_auto')
+                                          .tr(),
                                   value: '${state.baseline} μT',
                                 ),
                                 StatItem(
-                                  label: 'Peak Hold',
+                                  label: 'mag_peak_hold'.tr(),
                                   value: '${state.peakValue} μT',
                                   valueColor: AppColors.error,
                                 ),
                                 StatItem(
-                                  label: 'Vector (X/Y/Z)',
+                                  label: 'mag_vector'.tr(),
                                   value:
                                       '${state.x.toInt()}/${state.y.toInt()}/${state.z.toInt()}',
                                 ),
                               ],
                             ),
+                            if (isLive && !state.isBaselineCalibrated) ...[
+                              SizedBox(height: 8.h),
+                              Text(
+                                'mag_baseline_auto_hint'.tr(
+                                  args: {'button': 'mag_calibrate'.tr()},
+                                ),
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: secondaryText),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -358,7 +455,7 @@ class MagneticScannerScreen extends ConsumerWidget {
 
                     // Sensitivity Presets Selector
                     Text(
-                      'Detection Sensitivity Preset',
+                      'mag_sensitivity_title'.tr(),
                       style: Theme.of(context).textTheme.bodySmall
                           ?.copyWith(fontWeight: FontWeight.bold),
                     ),
@@ -369,9 +466,16 @@ class MagneticScannerScreen extends ConsumerWidget {
                         children: MagneticSensitivity.values.map((sens) {
                           final isSelected = state.sensitivity == sens;
                           return Padding(
-                            padding: EdgeInsets.only(right: 8.w),
+                            padding: EdgeInsetsDirectional.only(end: 8.w),
                             child: ChoiceChip(
-                              label: Text(sens.label),
+                              label: Text(
+                                'mag_sensitivity_chip'.tr(
+                                  args: {
+                                    'label': sens.labelKey.tr(),
+                                    'value': _threshold(sens),
+                                  },
+                                ),
+                              ),
                               selected: isSelected,
                               selectedColor: Theme.of(context)
                                   .colorScheme
@@ -383,6 +487,12 @@ class MagneticScannerScreen extends ConsumerWidget {
                         }).toList(),
                       ),
                     ),
+                    SizedBox(height: 4.h),
+                    Text(
+                      'mag_sensitivity_hint'.tr(),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: secondaryText),
+                    ),
                     SizedBox(height: AppDimens.spacingLarge),
 
                     // Action Buttons Row (Calibrate)
@@ -390,19 +500,9 @@ class MagneticScannerScreen extends ConsumerWidget {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () {
-                              notifier.calibrateBaseline();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Baseline calibrated to ambient environment',
-                                  ),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            },
+                            onPressed: isLive ? calibrate : null,
                             icon: const Icon(Icons.tune_rounded),
-                            label: const Text('Calibrate Baseline'),
+                            label: Text('mag_calibrate'.tr()),
                             style: OutlinedButton.styleFrom(
                               padding: EdgeInsets.symmetric(vertical: 12.h),
                               shape: RoundedRectangleBorder(
@@ -419,10 +519,8 @@ class MagneticScannerScreen extends ConsumerWidget {
 
                     // Log Incident Action Button
                     PrimaryButton(
-                      label: 'Log Magnetic Incident',
-                      onPressed: () {
-                        context.pushTo(AppRoute.actionNew, extra: null);
-                      },
+                      label: 'log_incident'.tr(),
+                      onPressed: logIncident,
                     ),
                   ],
                 ),
@@ -476,14 +574,18 @@ class MagneticScannerScreen extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Magnetic Scanner Operating Guide',
+                              'mag_guide_title'.tr(),
                               style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              'পরীক্ষা হলে ম্যাগনেটিক স্ক্যানার ব্যবহারের নির্দেশিকা',
+                              'mag_guide_subtitle'.tr(),
                               style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(color: Colors.grey),
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
                             ),
                           ],
                         ),
@@ -493,31 +595,41 @@ class MagneticScannerScreen extends ConsumerWidget {
                   const Divider(height: 24),
                   GuideStepItem(
                     stepNumber: '1',
-                    title: 'কীভাবে স্ক্যান করবেন (How to Hold Device)',
-                    description: 'আপনার মোবাইল ফোনটি পরীক্ষার্থীর জামা-কাপড়, পকেট, কলার, হাত বা পরীক্ষার বেঞ্চের ১ থেকে ৫ সেমি কাছে ধীরে ধীরে ঘোরাবেন। ফোনের ভেতরের Magnetometer সেন্সর ধাতু সনাক্ত করবে।',
+                    title: 'mag_guide_step1_title'.tr(),
+                    description: 'mag_guide_step1_text'.tr(),
                     icon: Icons.phonelink_ring_rounded,
                   ),
                   GuideStepItem(
                     stepNumber: '2',
-                    title: 'Microtesla (μT) রিডিংয়ের অর্থ (Reading Values)',
-                    description: '• 40 – 60 μT: স্বাভাবি পরিবেশ (কোনো মেটাল নেই)।\n• 70 – 90 μT: লুকানো মেটাল ইয়ারপিস, কাস্টম সার্কিট বা বেল্ট।\n• 100+ μT (CRITICAL): সক্রিয় স্মার্টফোন, স্মার্টওয়াচ বা উচ্চ ক্ষমতাসম্পন্ন ট্রান্সমিটার।',
+                    title: 'mag_guide_step2_title'.tr(),
+                    description: 'mag_guide_step2_text'.tr(
+                      args: {
+                        'low': _threshold(MagneticSensitivity.low),
+                        'medium': _threshold(MagneticSensitivity.medium),
+                        'high': _threshold(MagneticSensitivity.high),
+                      },
+                    ),
                     icon: Icons.speed_rounded,
                   ),
                   GuideStepItem(
                     stepNumber: '3',
-                    title: 'ক্যালিব্রেশন করার নিয়ম (Baseline Calibration)',
-                    description: 'লোহার বেঞ্চ বা চেয়ারের সাধারণ মেটাল নয়েজ ফিল্টার করতে ফাঁকা জায়গায় ফোন ধরে "Calibrate Baseline" বাটনে চাপ দিন। এতে করে পরিবেশ অনুযায়ী সেন্সর রিরেসেট হয়ে সঠিক রিপোর্ট দেবে।',
+                    title: 'mag_guide_step3_title'.tr(),
+                    description: 'mag_guide_step3_text'.tr(
+                      args: {'button': 'mag_calibrate'.tr()},
+                    ),
                     icon: Icons.tune_rounded,
                   ),
                   GuideStepItem(
                     stepNumber: '4',
-                    title: 'ঘটনা লগ করা (Log Incident)',
-                    description: 'সন্দেহজনক কোনো মেটাল বা ডিভাইস পেলে ১-ক্লিকে "Log Magnetic Incident" বাটনে চেপে পরীক্ষার্থীর রুল সহ রিপোর্ট সাবমিট করুন।',
+                    title: 'mag_guide_step4_title'.tr(),
+                    description: 'mag_guide_step4_text'.tr(
+                      args: {'button': 'log_incident'.tr()},
+                    ),
                     icon: Icons.report_problem_rounded,
                   ),
                   SizedBox(height: AppDimens.spacingMedium),
                   PrimaryButton(
-                    label: 'Got it! Start Scanning',
+                    label: 'mag_guide_done'.tr(),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],

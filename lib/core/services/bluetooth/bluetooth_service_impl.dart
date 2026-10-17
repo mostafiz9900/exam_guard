@@ -25,6 +25,11 @@ class BluetoothServiceImpl implements IBluetoothService {
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
   Timer? _restartTimer;
 
+  /// Start/stop requests run one at a time. Overlapping calls used to start
+  /// the radio twice, and Android blocks all results for 30 s after 5 scan
+  /// starts in 30 s, so the list stopped updating.
+  Future<void> _queue = Future.value();
+
   @override
   Future<bool> isSupported() => FlutterBluePlus.isSupported;
 
@@ -39,10 +44,35 @@ class BluetoothServiceImpl implements IBluetoothService {
   Stream<BleScanRecord> get scanRecords => _records.stream;
 
   @override
-  Future<void> startScan(String owner) async {
-    final wasIdle = _owners.isEmpty;
+  Future<void> startScan(String owner) {
     _owners.add(owner);
-    if (!wasIdle) return;
+    return _serial(_sync);
+  }
+
+  @override
+  Future<void> stopScan(String owner) {
+    _owners.remove(owner);
+    return _serial(_sync);
+  }
+
+  Future<void> _serial(Future<void> Function() op) {
+    final result = _queue.then((_) => op());
+    _queue = result.catchError((Object _) {});
+    return result;
+  }
+
+  /// Brings the radio and subscriptions in line with [_owners].
+  Future<void> _sync() async {
+    if (_owners.isEmpty) {
+      _restartTimer?.cancel();
+      _restartTimer = null;
+      await _adapterSub?.cancel();
+      _adapterSub = null;
+      await _resultsSub?.cancel();
+      _resultsSub = null;
+      await _stopRadio();
+      return;
+    }
 
     _resultsSub ??= FlutterBluePlus.onScanResults.listen(
       (results) {
@@ -50,41 +80,35 @@ class BluetoothServiceImpl implements IBluetoothService {
           _records.add(_mapResult(r));
         }
       },
-      onError: (Object e, StackTrace st) =>
-          _logger.warning('BLE scan stream error', e, st),
+      onError: (Object e, StackTrace st) {
+        _logger.warning('BLE scan stream error', e, st);
+        _records.addError(_scanError(e), st);
+      },
     );
 
     // Resume the shared scan automatically when Bluetooth comes back on.
     _adapterSub ??= FlutterBluePlus.adapterState.listen((s) {
-      if (s == BluetoothAdapterState.on && _owners.isNotEmpty) {
-        _startRadio();
+      if (s == BluetoothAdapterState.on) {
+        _serial(_sync).catchError((Object e, StackTrace st) {
+          _records.addError(e, st);
+        });
       }
     });
 
-    await _startRadio();
-    _restartTimer?.cancel();
-    _restartTimer = Timer.periodic(_scanRestartInterval, (_) async {
-      if (_owners.isEmpty) return;
-      await _stopRadio();
-      await _startRadio();
+    _restartTimer ??= Timer.periodic(_scanRestartInterval, (_) {
+      _serial(() async {
+        if (_owners.isEmpty) return;
+        await _stopRadio();
+        await _startRadio();
+      }).catchError((Object e, StackTrace st) {
+        _records.addError(e, st);
+      });
     });
-  }
 
-  @override
-  Future<void> stopScan(String owner) async {
-    _owners.remove(owner);
-    if (_owners.isNotEmpty) return;
-    _restartTimer?.cancel();
-    _restartTimer = null;
-    await _adapterSub?.cancel();
-    _adapterSub = null;
-    await _resultsSub?.cancel();
-    _resultsSub = null;
-    await _stopRadio();
+    if (!FlutterBluePlus.isScanningNow) await _startRadio();
   }
 
   Future<void> _startRadio() async {
-    if (FlutterBluePlus.isScanningNow) return;
     try {
       // oneByOne + continuousUpdates: every advertisement is delivered as it
       // arrives, so RSSI updates are real time.
@@ -96,6 +120,7 @@ class BluetoothServiceImpl implements IBluetoothService {
       );
     } catch (e, st) {
       _logger.warning('BLE startScan failed', e, st);
+      throw _scanError(e);
     }
   }
 
@@ -105,6 +130,23 @@ class BluetoothServiceImpl implements IBluetoothService {
     } catch (e, st) {
       _logger.warning('BLE stopScan failed', e, st);
     }
+  }
+
+  BleScanException _scanError(Object e) {
+    final text = e.toString().toLowerCase();
+    if (text.contains('location')) {
+      return const BleScanException(
+        'Turn on Location (GPS) — Android needs it to scan for Bluetooth devices.',
+        code: BleScanError.locationOff,
+      );
+    }
+    if (text.contains('frequently')) {
+      return const BleScanException(
+        'Android paused scanning (too many restarts). It resumes in about 30 seconds.',
+        code: BleScanError.throttled,
+      );
+    }
+    return BleScanException('Bluetooth scan failed: $e');
   }
 
   @override
@@ -154,9 +196,14 @@ class BluetoothServiceImpl implements IBluetoothService {
 
   BleScanRecord _mapResult(ScanResult r) {
     final adv = r.advertisementData;
-    final name = adv.advName.trim().isNotEmpty
-        ? adv.advName.trim()
-        : r.device.platformName.trim();
+    // Android delivers the advertisement and the scan response (which often
+    // carries the name) as separate packets, so fall back to the name this
+    // device advertised earlier, then to the OS-cached name.
+    final name = [
+      adv.advName,
+      r.device.advName,
+      r.device.platformName,
+    ].map((n) => n.trim()).firstWhere((n) => n.isNotEmpty, orElse: () => '');
     return BleScanRecord(
       id: r.device.remoteId.str.trim().toUpperCase(),
       name: name,

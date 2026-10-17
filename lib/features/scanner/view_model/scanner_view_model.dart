@@ -2,18 +2,21 @@ import 'dart:async';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/repository/scanner_repository.dart';
 
 enum RoomSizePreset {
-  small('Small Room (~3m)', -75),
-  medium('Standard Hall (~4.5m)', -85),
-  large('Large Hall (~6.5m)', -95);
+  small('scan_room_small', -75),
+  medium('scan_room_medium', -85),
+  large('scan_room_large', -95);
 
-  const RoomSizePreset(this.label, this.rssiThreshold);
-  final String label;
+  const RoomSizePreset(this.labelKey, this.rssiThreshold);
+
+  /// Translation key of the preset's display name.
+  final String labelKey;
   final int rssiThreshold;
 }
 
@@ -23,7 +26,12 @@ class ScannerState {
   final bool isRoomBoundaryMode;
   final RoomSizePreset roomSizePreset;
   final bool isBluetoothOff;
+
+  /// Translation key of the current error, or null when there is none.
   final String? errorMessage;
+
+  /// Placeholder values for [errorMessage].
+  final Map<String, String> errorArgs;
 
   const ScannerState({
     this.isScanning = false,
@@ -32,6 +40,7 @@ class ScannerState {
     this.roomSizePreset = RoomSizePreset.medium,
     this.isBluetoothOff = false,
     this.errorMessage,
+    this.errorArgs = const {},
   });
 
   /// Returns list filtered by Room Boundary limit when active
@@ -54,6 +63,7 @@ class ScannerState {
     RoomSizePreset? roomSizePreset,
     bool? isBluetoothOff,
     String? errorMessage,
+    Map<String, String>? errorArgs,
     bool clearError = false,
   }) {
     return ScannerState(
@@ -63,6 +73,9 @@ class ScannerState {
       roomSizePreset: roomSizePreset ?? this.roomSizePreset,
       isBluetoothOff: isBluetoothOff ?? this.isBluetoothOff,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      errorArgs: clearError
+          ? const {}
+          : (errorArgs ?? (errorMessage != null ? const {} : this.errorArgs)),
     );
   }
 }
@@ -73,12 +86,18 @@ class ScannerViewModel extends Notifier<ScannerState> {
   /// A device that has not advertised for this long is removed.
   static const Duration _goneAfter = Duration(seconds: 30);
 
+  /// Phones, watches and earbuds change their random BLE address every few
+  /// minutes. An entry silent for this long that looks exactly like a newly
+  /// appeared address is treated as the same device.
+  static const Duration _rotationGap = Duration(seconds: 5);
+
   late ScannerRepository _repository;
   late AppLogger _logger;
 
-  StreamSubscription<DeviceSighting>? _sightingsSub;
+  StreamSubscription<ScannedDeviceModel>? _sightingsSub;
   StreamSubscription<bool>? _adapterSub;
   Timer? _evictTimer;
+  Future<void>? _starting;
 
   @override
   ScannerState build() {
@@ -122,7 +141,12 @@ class ScannerViewModel extends Notifier<ScannerState> {
       state = state.copyWith(isScanning: false);
       return;
     }
+    // The view model, the screen and the adapter listener can all ask to
+    // start at once; share one start so permissions are requested only once.
+    return _starting ??= _start().whenComplete(() => _starting = null);
+  }
 
+  Future<void> _start() async {
     if (!await checkPermissions()) {
       if (ref.mounted) state = state.copyWith(isScanning: false);
       return;
@@ -130,15 +154,46 @@ class ScannerViewModel extends Notifier<ScannerState> {
     if (!ref.mounted) return;
 
     _sightingsSub?.cancel();
-    _sightingsSub = _repository.sightings().listen(_onSighting);
+    _sightingsSub = _repository.sightings().listen(
+      _onSighting,
+      onError: (Object e, StackTrace st) {
+        _logger.warning('BLE scan error', e, st);
+        if (ref.mounted) _setScanError(e);
+      },
+    );
     _evictTimer?.cancel();
     _evictTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _evictStaleDevices();
     });
 
-    await _repository.startScan();
+    try {
+      await _repository.startScan();
+    } on BleScanException catch (e) {
+      if (!ref.mounted) return;
+      _stop(keepAdapterListener: true);
+      state = state.copyWith(isScanning: false);
+      _setScanError(e);
+      return;
+    }
     if (ref.mounted) {
       state = state.copyWith(isScanning: true, clearError: true);
+    }
+  }
+
+  /// Maps a scan failure to a translatable message. Known core messages get
+  /// their own key; anything else is shown as reported.
+  void _setScanError(Object e) {
+    final text = e is BleScanException ? e.message : '$e';
+    final code = e is BleScanException ? e.code : BleScanError.other;
+    if (code == BleScanError.locationOff) {
+      state = state.copyWith(errorMessage: 'scan_err_location');
+    } else if (code == BleScanError.throttled) {
+      state = state.copyWith(errorMessage: 'scan_err_throttled');
+    } else {
+      state = state.copyWith(
+        errorMessage: 'scan_err_detail',
+        errorArgs: {'detail': text},
+      );
     }
   }
 
@@ -175,7 +230,8 @@ class ScannerViewModel extends Notifier<ScannerState> {
       if (!ref.mounted) return;
       _replace(deviceId, (d) => d.copyWith(isConnecting: false));
       state = state.copyWith(
-        errorMessage: 'Could not connect to ${target.displayName}',
+        errorMessage: 'scan_err_connect_failed',
+        errorArgs: {'name': target.displayName},
       );
     }
   }
@@ -200,9 +256,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
     } catch (e, st) {
       _logger.warning('Turning Bluetooth on failed', e, st);
       if (ref.mounted) {
-        state = state.copyWith(
-          errorMessage: 'Please turn on Bluetooth from system settings.',
-        );
+        state = state.copyWith(errorMessage: 'scan_err_enable_bluetooth');
       }
     }
   }
@@ -211,7 +265,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
     try {
       if (!await _repository.isSupported()) {
         state = state.copyWith(
-          errorMessage: 'Bluetooth hardware is not supported on this device',
+          errorMessage: 'scan_err_unsupported',
           isBluetoothOff: true,
         );
         return false;
@@ -221,14 +275,10 @@ class ScannerViewModel extends Notifier<ScannerState> {
       if (!ref.mounted) return false;
       switch (permission) {
         case AppPermissionStatus.permanentlyDenied:
-          state = state.copyWith(
-            errorMessage: 'Bluetooth/Location permission permanently denied. Please enable in Settings.',
-          );
+          state = state.copyWith(errorMessage: 'scan_err_permission_permanent');
           return false;
         case AppPermissionStatus.denied:
-          state = state.copyWith(
-            errorMessage: 'Bluetooth/Location permission is required to scan.',
-          );
+          state = state.copyWith(errorMessage: 'scan_err_permission_required');
           return false;
         case AppPermissionStatus.granted:
           break;
@@ -239,7 +289,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
       if (!isOn) {
         state = state.copyWith(
           isBluetoothOff: true,
-          errorMessage: 'Bluetooth is OFF. Please turn ON Bluetooth to scan.',
+          errorMessage: 'scan_err_bluetooth_off',
         );
         return false;
       }
@@ -249,43 +299,71 @@ class ScannerViewModel extends Notifier<ScannerState> {
     } catch (e, st) {
       _logger.error('Bluetooth permission check failed', e, st);
       if (ref.mounted) {
-        state = state.copyWith(errorMessage: 'Bluetooth check failed: $e');
+        state = state.copyWith(
+          errorMessage: 'scan_err_check_failed',
+          errorArgs: {'detail': '$e'},
+        );
       }
       return false;
     }
   }
 
-  void _onSighting(DeviceSighting sighting) {
+  void _onSighting(ScannedDeviceModel seen) {
     if (!ref.mounted) return;
-    final seen = sighting.device;
     final existing = _find(seen.id);
+    final rotatedFrom = existing == null ? _rotatedFrom(seen) : null;
+    final previous = existing ?? rotatedFrom;
 
-    final device = existing == null
+    final device = previous == null
         ? seen
         : seen.copyWith(
-            // Keep a real advertised name over a later nameless packet.
-            name: sighting.hasAdvertisedName ? seen.name : existing.name,
             // Light smoothing keeps the list readable without hiding movement.
-            rssi: ((0.6 * seen.rssi) + (0.4 * existing.rssi)).round(),
-            txPower: seen.txPower ?? existing.txPower,
-            serviceUuids: seen.serviceUuids.isNotEmpty
-                ? seen.serviceUuids
-                : existing.serviceUuids,
-            firstSeen: existing.firstSeen,
-            isConnected: existing.isConnected,
-            isConnecting: existing.isConnecting,
-            batteryLevel: existing.batteryLevel,
-            fullGattName: existing.fullGattName,
+            rssi: existing == null
+                ? seen.rssi
+                : ((0.6 * seen.rssi) + (0.4 * existing.rssi)).round(),
+            isConnectable: seen.isConnectable || previous.isConnectable,
+            firstSeen: previous.firstSeen,
+            isConnected: existing?.isConnected,
+            isConnecting: existing?.isConnecting,
+            batteryLevel: existing?.batteryLevel,
+            fullGattName: existing?.fullGattName,
           );
 
     final devices = [
       for (final d in state.devices)
-        if (d.id != seen.id) d,
+        if (d.id != seen.id && d.id != rotatedFrom?.id) d,
       device,
     ]..sort((a, b) => b.firstSeen.compareTo(a.firstSeen));
 
     state = state.copyWith(devices: devices);
   }
+
+  /// The entry a newly seen address most likely replaced: same name (or,
+  /// for nameless devices, same vendor, category and services) and silent
+  /// since before [_rotationGap]. Two identical devices that are both
+  /// advertising are never merged.
+  ScannedDeviceModel? _rotatedFrom(ScannedDeviceModel seen) {
+    final now = DateTime.now();
+    ScannedDeviceModel? match;
+    for (final d in state.devices) {
+      if (d.isConnected || d.isConnecting) continue;
+      if (now.difference(d.lastSeen) < _rotationGap) continue;
+      final sameIdentity = seen.hasName || d.hasName
+          ? seen.name.trim() == d.name.trim()
+          : seen.manufacturer == d.manufacturer &&
+                seen.manufacturer != 'Generic BLE Hardware' &&
+                seen.deviceType == d.deviceType &&
+                _sameServices(seen.serviceUuids, d.serviceUuids);
+      if (sameIdentity &&
+          (match == null || d.lastSeen.isAfter(match.lastSeen))) {
+        match = d;
+      }
+    }
+    return match;
+  }
+
+  static bool _sameServices(List<String> a, List<String> b) =>
+      a.length == b.length && a.toSet().containsAll(b);
 
   ScannedDeviceModel? _find(String id) {
     for (final d in state.devices) {
@@ -320,5 +398,9 @@ class ScannerViewModel extends Notifier<ScannerState> {
   }
 }
 
+/// Auto-disposed so the BLE scan stops once the dashboard and scanner
+/// screens are gone (e.g. after End Exam).
 final scannerViewModelProvider =
-    NotifierProvider<ScannerViewModel, ScannerState>(ScannerViewModel.new);
+    NotifierProvider.autoDispose<ScannerViewModel, ScannerState>(
+      ScannerViewModel.new,
+    );

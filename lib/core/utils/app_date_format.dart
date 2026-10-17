@@ -21,4 +21,10 @@ class AppDateFormat {
 
   /// 2026-10-13
   static String date(DateTime d) => easy.DateFormat('yyyy-MM-dd').format(d);
+
+  /// 1h 05m (negative durations show as 0h 00m)
+  static String duration(Duration d) {
+    final safe = d.isNegative ? Duration.zero : d;
+    return '${safe.inHours}h ${(safe.inMinutes % 60).toString().padLeft(2, '0')}m';
+  }
 }

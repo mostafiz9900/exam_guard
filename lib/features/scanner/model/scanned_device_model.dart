@@ -34,19 +34,31 @@ class ScannedDeviceModel {
     this.fullGattName,
   });
 
-  /// Displays human readable name or manufacturer fallback
+  /// Advertised (or GATT) name, otherwise a label built from what the
+  /// device is, e.g. "Apple Device (4F:2A)".
   String get displayName {
-    if (fullGattName != null && fullGattName!.isNotEmpty) {
-      return fullGattName!;
+    final gatt = fullGattName?.trim() ?? '';
+    if (gatt.isNotEmpty) return gatt;
+    if (name.trim().isNotEmpty) return name.trim();
+
+    final suffix = id.length >= 5 ? id.substring(id.length - 5) : id;
+    if (manufacturer.contains('Apple')) {
+      return deviceType.contains('Audio')
+          ? 'AirPods / Beats ($suffix)'
+          : 'Apple Device ($suffix)';
     }
-    if (name.isNotEmpty && name != 'Unknown Device') {
-      return name;
+    if (manufacturer.contains('Samsung')) return 'Samsung Device ($suffix)';
+    if (manufacturer.contains('Espressif')) return 'ESP32 Module ($suffix)';
+    if (deviceType.contains('Audio')) return 'Wireless Earpiece ($suffix)';
+    if (deviceType.contains('Wearable')) return 'Smartband / Watch ($suffix)';
+    if (manufacturer != 'Generic BLE Hardware') {
+      return '$manufacturer ($suffix)';
     }
-    if (manufacturer.isNotEmpty && manufacturer != 'Generic BLE Hardware') {
-      return '$manufacturer (Hidden Name)';
-    }
-    return 'Hidden BLE Device (${id.length > 8 ? id.substring(id.length - 8) : id})';
+    return 'Hidden BLE Device ($suffix)';
   }
+
+  /// True when this device is advertising under a name.
+  bool get hasName => name.trim().isNotEmpty || (fullGattName ?? '').isNotEmpty;
 
   ScannedDeviceModel copyWith({
     String? id,

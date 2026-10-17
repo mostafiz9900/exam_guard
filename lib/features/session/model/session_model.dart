@@ -18,6 +18,9 @@ class SessionModel {
   /// True while the exam is running.
   bool get isActive => endTime == null;
 
+  /// Exam length so far (until now while it is still running).
+  Duration get duration => (endTime ?? DateTime.now()).difference(startTime);
+
   const SessionModel({
     required this.id,
     required this.instituteName,

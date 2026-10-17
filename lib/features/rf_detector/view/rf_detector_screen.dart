@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
+import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/rf_detector/view_model/rf_detector_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
+import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/rf_detector/model/rf_threat_level.dart';
 import 'package:exam_guard/features/rf_detector/view/widgets/guide_step_tile.dart';
 import 'package:exam_guard/features/rf_detector/view/widgets/rf_wave_painter.dart';
@@ -53,7 +54,7 @@ class RfDetectorScreen extends ConsumerWidget {
                     ),
                     SizedBox(width: 8.w),
                     Text(
-                      'RF Activity Meter Guide',
+                      'rf_guide_title'.tr(),
                       style: Theme.of(context).textTheme.titleMedium
                           ?.copyWith(fontWeight: FontWeight.bold),
                     ),
@@ -63,27 +64,27 @@ class RfDetectorScreen extends ConsumerWidget {
 
                 GuideStepTile(
                   stepNumber: '1',
-                  title: 'What this meter measures',
-                  description: 'Live 2.4 GHz Bluetooth transmissions received by this phone, in dBm. It shows the strongest nearby transmitter, packets per second and how many devices are transmitting. A phone cannot measure cellular (SIM) signals directly.',
+                  title: 'rf_guide_step1_title'.tr(),
+                  description: 'rf_guide_step1_text'.tr(),
                 ),
                 SizedBox(height: 12.h),
 
                 GuideStepTile(
                   stepNumber: '2',
-                  title: 'Finding a hidden transmitter 📍',
-                  description: 'Walk slowly between desks. Above -50 dBm the transmitter is within about 1 metre: the meter turns red and beeps.',
+                  title: 'rf_guide_step2_title'.tr(),
+                  description: 'rf_guide_step2_text'.tr(),
                 ),
                 SizedBox(height: 12.h),
 
                 GuideStepTile(
                   stepNumber: '3',
-                  title: 'ESP32 hardware node 📡',
-                  description: 'If an ExamGuard ESP32 node is powered on nearby, its badge turns green. The node is detected by its Bluetooth name (examguard / esp32 / rf-node).',
+                  title: 'rf_guide_step3_title'.tr(),
+                  description: 'rf_guide_step3_text'.tr(),
                 ),
                 SizedBox(height: 16.h),
 
                 PrimaryButton(
-                  label: 'Got It / Continue Monitoring',
+                  label: 'rf_guide_done'.tr(),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -98,7 +99,33 @@ class RfDetectorScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(rfDetectorViewModelProvider);
     final notifier = ref.read(rfDetectorViewModelProvider.notifier);
-    final themeColor = _getThreatColor(state.threatLevel);
+    final colorScheme = Theme.of(context).colorScheme;
+    final secondaryText = colorScheme.onSurfaceVariant;
+    final isMeasuring = state.isMeasuring;
+    final themeColor = isMeasuring
+        ? _getThreatColor(state.threatLevel)
+        : colorScheme.outline;
+
+    final summaryArgs = {
+      'count': '${state.activeTransmitters}',
+      'rate': '${state.packetsPerSecond}',
+      'name': state.strongestSourceName ?? '',
+    };
+    final summary = state.strongestSourceName != null
+        ? 'rf_summary_strongest'.tr(args: summaryArgs)
+        : 'rf_summary'.tr(args: summaryArgs);
+
+    Future<void> logIncident() async {
+      notifier.setAlertsSuspended(true);
+      await context.pushTo(
+        AppRoute.actionNew,
+        extra: ActionEntryArgs(
+          category: 'RF Transmitter',
+          notes: notifier.incidentNotes(),
+        ),
+      );
+      if (context.mounted) notifier.setAlertsSuspended(false);
+    }
 
     return PopScope(
       canPop: false,
@@ -112,22 +139,22 @@ class RfDetectorScreen extends ConsumerWidget {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Live RF Activity Meter'),
+          title: Text('rf_meter'.tr()),
           actions: [
             IconButton(
               icon: const Icon(Icons.help_outline_rounded),
               onPressed: () => _showOperatingGuideModal(context),
-              tooltip: 'Operating Guide',
+              tooltip: 'rf_guide_title'.tr(),
             ),
             IconButton(
               icon: Icon(
                 state.isBuzzerEnabled
                     ? Icons.volume_up_rounded
                     : Icons.volume_off_rounded,
-                color: state.isBuzzerEnabled ? themeColor : Colors.grey,
+                color: state.isBuzzerEnabled ? themeColor : colorScheme.outline,
               ),
               onPressed: () => notifier.toggleBuzzer(),
-              tooltip: 'Geiger Audio Beep',
+              tooltip: 'rf_audio_tooltip'.tr(),
             ),
             const AppSettingsMenu(),
           ],
@@ -181,7 +208,7 @@ class RfDetectorScreen extends ConsumerWidget {
                                           Expanded(
                                             child: Text(
                                               state.hardwareNodeName ??
-                                                  'Phone Bluetooth radio',
+                                                  'rf_phone_radio'.tr(),
                                               style: TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13.sp,
@@ -197,27 +224,22 @@ class RfDetectorScreen extends ConsumerWidget {
                                               vertical: 3.h,
                                             ),
                                             decoration: BoxDecoration(
-                                              color:
-                                                  (state.isHardwareNodeNearby
-                                                          ? AppColors.success
-                                                          : Colors.blue)
-                                                      .withValues(alpha: 0.15),
+                                              color: colorScheme.primary
+                                                  .withValues(alpha: 0.15),
                                               borderRadius:
                                                   BorderRadius.circular(8.r),
                                             ),
                                             child: Text(
-                                              state.isHardwareNodeNearby
-                                                  ? 'ESP32 NODE NEARBY'
-                                                  : (state.isScanning
-                                                        ? 'LIVE'
-                                                        : 'STOPPED'),
+                                              (state.isHardwareNodeNearby
+                                                      ? 'rf_badge_node'
+                                                      : (isMeasuring
+                                                            ? 'rf_badge_live'
+                                                            : 'rf_badge_stopped'))
+                                                  .tr(),
                                               style: TextStyle(
                                                 fontSize: 9.sp,
                                                 fontWeight: FontWeight.bold,
-                                                color:
-                                                    state.isHardwareNodeNearby
-                                                    ? AppColors.success
-                                                    : Colors.blue,
+                                                color: colorScheme.primary,
                                               ),
                                             ),
                                           ),
@@ -225,12 +247,10 @@ class RfDetectorScreen extends ConsumerWidget {
                                       ),
                                       SizedBox(height: 2.h),
                                       Text(
-                                        state.errorMessage ??
-                                            '${state.activeTransmitters} transmitters • ${state.packetsPerSecond} packets/s'
-                                                '${state.strongestSourceName != null ? ' • strongest: ${state.strongestSourceName}' : ''}',
+                                        state.errorKey?.tr() ?? summary,
                                         style: TextStyle(
                                           fontSize: 10.sp,
-                                          color: Colors.grey.shade600,
+                                          color: secondaryText,
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
@@ -276,7 +296,7 @@ class RfDetectorScreen extends ConsumerWidget {
                                 ),
                               ),
                               Text(
-                                'dBm STRONGEST SIGNAL',
+                                'rf_strongest_signal'.tr(),
                                 style: TextStyle(
                                   fontSize: 10.sp,
                                   fontWeight: FontWeight.bold,
@@ -295,7 +315,13 @@ class RfDetectorScreen extends ConsumerWidget {
                                   borderRadius: BorderRadius.circular(10.r),
                                 ),
                                 child: Text(
-                                  'Peak: ${state.peakDbm?.toStringAsFixed(0) ?? '--'} dBm',
+                                  'rf_peak'.tr(
+                                    args: {
+                                      'value':
+                                          state.peakDbm?.toStringAsFixed(0) ??
+                                          '--',
+                                    },
+                                  ),
                                   style: TextStyle(
                                     fontSize: 10.sp,
                                     fontWeight: FontWeight.bold,
@@ -326,7 +352,18 @@ class RfDetectorScreen extends ConsumerWidget {
                             child: Column(
                               children: [
                                 Text(
-                                  state.threatLevel.label,
+                                  isMeasuring
+                                      ? state.threatLevel.labelKey.tr()
+                                      : (state.isStarting
+                                            ? 'rf_starting'.tr()
+                                            : 'rf_not_measuring'.tr(
+                                                args: {
+                                                  'reason':
+                                                      (state.errorKey ??
+                                                              'rf_reason_stopped')
+                                                          .tr(),
+                                                },
+                                              )),
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13.sp,
@@ -336,13 +373,26 @@ class RfDetectorScreen extends ConsumerWidget {
                                 ),
                                 SizedBox(height: 4.h),
                                 Text(
-                                  state.threatLevel.suggestion,
+                                  (isMeasuring
+                                          ? state.threatLevel.suggestionKey
+                                          : (state.isBluetoothOff
+                                                ? 'rf_bluetooth_off_hint'
+                                                : 'rf_not_measuring_hint'))
+                                      .tr(),
                                   style: TextStyle(
                                     fontSize: 11.sp,
-                                    color: Colors.grey.shade800,
+                                    color: secondaryText,
                                   ),
                                   textAlign: TextAlign.center,
                                 ),
+                                if (!isMeasuring && !state.isStarting) ...[
+                                  SizedBox(height: 8.h),
+                                  OutlinedButton.icon(
+                                    onPressed: notifier.startScanning,
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    label: Text('rf_retry'.tr()),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -366,15 +416,21 @@ class RfDetectorScreen extends ConsumerWidget {
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      '2.4 GHz Signal History (-100 to -20 dBm)',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 11.sp,
+                                    Expanded(
+                                      child: Text(
+                                        'rf_history_title'.tr(),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11.sp,
+                                        ),
                                       ),
                                     ),
+                                    SizedBox(width: 8.w),
                                     Text(
-                                      'Live Stream',
+                                      (isMeasuring
+                                              ? 'rf_history_live'
+                                              : 'rf_history_stopped')
+                                          .tr(),
                                       style: TextStyle(
                                         fontSize: 10.sp,
                                         color: themeColor,
@@ -403,15 +459,13 @@ class RfDetectorScreen extends ConsumerWidget {
                         OutlinedButton.icon(
                           onPressed: () => notifier.resetPeak(),
                           icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Reset Peak'),
+                          label: Text('rf_reset_peak'.tr()),
                         ),
                         SizedBox(height: AppDimens.spacingLarge),
 
                         PrimaryButton(
-                          label: 'Log Violation Incident Report',
-                          onPressed: () {
-                            context.pushTo(AppRoute.actionNew);
-                          },
+                          label: 'log_incident'.tr(),
+                          onPressed: logIncident,
                         ),
                       ],
                     ),

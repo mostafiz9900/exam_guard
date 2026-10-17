@@ -1,3 +1,5 @@
+import 'dart:ui' show Rect;
+
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/share/i_share_service.dart';
@@ -24,7 +26,7 @@ class ActionLogRepository {
 =================================================================
              OFFICIAL EXAM SECURITY VIOLATION REPORT
 =================================================================
-Report Generated At: $timestamp
+Incident Logged At : $timestamp
 Institute / Center : ${orDash(session?.instituteName)}
 Exam Room / Hall   : ${orDash(session?.roomNumber)}
 Inspector In-Charge: ${orDash(session?.teacherName)}
@@ -36,7 +38,7 @@ Candidate Seat No. : ${orDash(log.location)}
 Category           : ${orDash(log.category)}
 Severity           : ${log.severity.code}
 Device Name        : ${orDash(log.deviceName)}
-MAC Address / ID   : ${orDash(log.deviceId)}
+Device ID          : ${orDash(log.deviceId)}
 Hardware Vendor    : ${orDash(scannedDevice?.manufacturer)}
 Last RSSI          : ${scannedDevice == null ? '-' : '${scannedDevice.rssi} dBm'}
 
@@ -52,8 +54,11 @@ Date: $timestamp
 ''';
   }
 
-  Future<ShareOutcome> shareReport(String text, {required String subject}) =>
-      _share.shareText(text, subject: subject);
+  Future<ShareOutcome> shareReport(
+    String text, {
+    required String subject,
+    Rect? origin,
+  }) => _share.shareText(text, subject: subject, origin: origin);
 }
 
 final actionLogRepositoryProvider = Provider<ActionLogRepository>(

@@ -36,6 +36,8 @@ class LiveStatBadge extends StatelessWidget {
             SizedBox(height: 4.h),
             Text(
               value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 13.sp,
@@ -44,7 +46,13 @@ class LiveStatBadge extends StatelessWidget {
             ),
             Text(
               title,
-              style: TextStyle(fontSize: 9.sp, color: Colors.grey.shade700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 9.sp,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),

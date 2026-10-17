@@ -14,6 +14,7 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
+import 'package:exam_guard/features/scanner/view/device_type_labels.dart';
 import 'package:exam_guard/features/scanner/view/widgets/detail_row.dart';
 import 'package:exam_guard/features/scanner/view/widgets/multi_target_radar_chart_widget.dart';
 import 'package:exam_guard/features/scanner/view/widgets/professional_device_card.dart';
@@ -31,26 +32,17 @@ enum DeviceFilter {
   covertEsp,
   smartphones;
 
-  String get label {
-    switch (this) {
-      case DeviceFilter.all:
-        return 'All Targets';
-      case DeviceFilter.connected:
-        return 'Connected 🔗';
-      case DeviceFilter.strongSignal:
-        return 'Strong (> -65 dBm)';
-      case DeviceFilter.audioDevices:
-        return 'Earbuds & AirPods';
-      case DeviceFilter.wifiHotspots:
-        return 'Wi-Fi Hotspots & Tethering';
-      case DeviceFilter.wearables:
-        return 'Smartwatches';
-      case DeviceFilter.covertEsp:
-        return 'Covert ESP32';
-      case DeviceFilter.smartphones:
-        return 'Smartphones';
-    }
-  }
+  /// Translation key of the filter chip label.
+  String get labelKey => switch (this) {
+    DeviceFilter.all => 'scan_filter_all',
+    DeviceFilter.connected => 'scan_filter_connected',
+    DeviceFilter.strongSignal => 'scan_filter_strong',
+    DeviceFilter.audioDevices => 'scan_filter_audio',
+    DeviceFilter.wifiHotspots => 'scan_filter_hotspots',
+    DeviceFilter.wearables => 'scan_filter_wearables',
+    DeviceFilter.covertEsp => 'scan_filter_esp32',
+    DeviceFilter.smartphones => 'scan_filter_smartphones',
+  };
 }
 
 class WirelessScannerScreen extends HookConsumerWidget {
@@ -101,11 +93,13 @@ class WirelessScannerScreen extends HookConsumerWidget {
 
     // Error feedback snackbar
     ref.listen(scannerViewModelProvider, (previous, next) {
-      if (next.errorMessage != null &&
-          next.errorMessage != previous?.errorMessage) {
+      final error = next.errorMessage;
+      if (error != null &&
+          (error != previous?.errorMessage ||
+              next.errorArgs != previous?.errorArgs)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(next.errorMessage!),
+            content: Text(error.tr(args: next.errorArgs)),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
@@ -133,7 +127,6 @@ class WirelessScannerScreen extends HookConsumerWidget {
           return device.deviceType.contains('Hotspot') ||
               device.name.toLowerCase().contains('hotspot') ||
               device.name.toLowerCase().contains('tether') ||
-              device.name.toLowerCase().contains('ap') ||
               device.name.toLowerCase().contains('direct-');
         case DeviceFilter.wearables:
           return device.deviceType.contains('Wearable') ||
@@ -174,7 +167,9 @@ class WirelessScannerScreen extends HookConsumerWidget {
                     : Icons.play_arrow_rounded,
                 size: 28.w,
               ),
-              tooltip: scannerState.isScanning ? 'Stop Scan' : 'Start Scan',
+              tooltip: scannerState.isScanning
+                  ? 'stop_scanning'.tr()
+                  : 'start_scanning'.tr(),
               onPressed: () {
                 scannerNotifier.toggleScanning();
               },
@@ -291,8 +286,13 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                   ),
                                   child: Text(
                                     scannerState.isScanning
-                                        ? 'LIVE • ${scannerState.activeDevices.length} DEVICES'
-                                        : 'PAUSED',
+                                        ? 'scan_live_devices'.tr(
+                                            args: {
+                                              'count':
+                                                  '${scannerState.activeDevices.length}',
+                                            },
+                                          )
+                                        : 'scan_paused'.tr(),
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
@@ -362,8 +362,8 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                   children: [
                                     Text(
                                       scannerState.isRoomBoundaryMode
-                                          ? 'EXAM ROOM BOUNDARY: ON'
-                                          : 'UNRESTRICTED SCAN: OFF',
+                                          ? 'scan_boundary_on'.tr()
+                                          : 'scan_boundary_off'.tr(),
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
@@ -382,7 +382,8 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                       PopupMenuButton<RoomSizePreset>(
                                         initialValue:
                                             scannerState.roomSizePreset,
-                                        tooltip: 'Change Room Boundary Size',
+                                        tooltip: 'scan_boundary_size_tooltip'
+                                            .tr(),
                                         padding: EdgeInsets.zero,
                                         constraints: const BoxConstraints(),
                                         icon: Icon(
@@ -406,7 +407,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                             >(
                                               value: preset,
                                               child: Text(
-                                                preset.label,
+                                                preset.labelKey.tr(),
                                                 style: TextStyle(
                                                   fontSize: 12.sp,
                                                 ),
@@ -420,8 +421,15 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                 ),
                                 Text(
                                   scannerState.isRoomBoundaryMode
-                                      ? 'Limits scan to ${scannerState.roomSizePreset.label}'
-                                      : 'Scans max distance (Includes outside hallway)',
+                                      ? 'scan_boundary_limit'.tr(
+                                          args: {
+                                            'room': scannerState
+                                                .roomSizePreset
+                                                .labelKey
+                                                .tr(),
+                                          },
+                                        )
+                                      : 'scan_boundary_unrestricted'.tr(),
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
                                         fontSize: 10.sp,
@@ -459,7 +467,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                           return Padding(
                             padding: EdgeInsets.only(right: 6.w),
                             child: FilterChip(
-                              label: Text(filter.label),
+                              label: Text(filter.labelKey.tr()),
                               selected: isSelected,
                               onSelected: (_) => activeFilter.value = filter,
                               showCheckmark: false,
@@ -498,7 +506,9 @@ class WirelessScannerScreen extends HookConsumerWidget {
                         ),
                         SizedBox(width: 6.w),
                         Text(
-                          'Discovered Targets (${filteredDevices.length})',
+                          'scan_discovered_count'.tr(
+                            args: {'count': '${filteredDevices.length}'},
+                          ),
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(
                                 fontWeight: FontWeight.bold,
@@ -542,7 +552,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                       ),
                                       SizedBox(width: 4.w),
                                       Text(
-                                        'List',
+                                        'scan_view_list'.tr(),
                                         style: TextStyle(
                                           fontSize: 10.sp,
                                           fontWeight: FontWeight.bold,
@@ -580,7 +590,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                       ),
                                       SizedBox(width: 4.w),
                                       Text(
-                                        'Radar Map',
+                                        'scan_view_radar'.tr(),
                                         style: TextStyle(
                                           fontSize: 10.sp,
                                           fontWeight: FontWeight.bold,
@@ -642,7 +652,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                   ),
                                   SizedBox(height: 8.h),
                                   Text(
-                                    'Tap any target dot on the radar map to open live 1-on-1 Tracking Radar',
+                                    'scan_radar_map_hint'.tr(),
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
@@ -704,7 +714,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                               ),
                                               SizedBox(height: 8.h),
                                               Text(
-                                                'Bluetooth Must Be Turned ON!',
+                                                'scan_bt_off_title'.tr(),
                                                 style: TextStyle(
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 15.sp,
@@ -713,7 +723,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                               ),
                                               SizedBox(height: 4.h),
                                               Text(
-                                                'ExamGuard requires active Bluetooth & Location services to scan hall frequencies and detect earpieces, smartwatches, and mobile hotspots.',
+                                                'scan_bt_off_message'.tr(),
                                                 style: TextStyle(
                                                   fontSize: 11.sp,
                                                   color: Colors.red.shade700,
@@ -737,8 +747,8 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                                       .bluetooth_searching_rounded,
                                                   size: 16.w,
                                                 ),
-                                                label: const Text(
-                                                  'Turn ON Bluetooth Now',
+                                                label: Text(
+                                                  'scan_bt_turn_on'.tr(),
                                                 ),
                                               ),
                                             ],
@@ -770,11 +780,20 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                                 SizedBox(height: 10.h),
                                                 Text(
                                                   scannerState.isScanning
-                                                      ? 'Scanning BLE frequencies...'
+                                                      ? 'scan_empty_scanning'
+                                                            .tr()
                                                       : (scannerState
                                                                 .isRoomBoundaryMode
-                                                            ? 'No targets detected inside Room Boundary (${scannerState.roomSizePreset.label}).'
-                                                            : 'No matching devices found.'),
+                                                            ? 'scan_empty_in_boundary'.tr(
+                                                                args: {
+                                                                  'room': scannerState
+                                                                      .roomSizePreset
+                                                                      .labelKey
+                                                                      .tr(),
+                                                                },
+                                                              )
+                                                            : 'scan_empty_no_match'
+                                                                  .tr()),
                                                   textAlign: TextAlign.center,
                                                   style: Theme.of(context)
                                                       .textTheme
@@ -787,8 +806,10 @@ class WirelessScannerScreen extends HookConsumerWidget {
                                                 Text(
                                                   scannerState
                                                           .isRoomBoundaryMode
-                                                      ? 'Turn OFF Room Boundary Mode to include outside hallway.'
-                                                      : 'Tap Play button or pull down to refresh.',
+                                                      ? 'scan_empty_boundary_hint'
+                                                            .tr()
+                                                      : 'scan_empty_refresh_hint'
+                                                            .tr(),
                                                   style: Theme.of(context)
                                                       .textTheme
                                                       .labelSmall
@@ -820,6 +841,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                               itemBuilder: (context, index) {
                                 final device = filteredDevices[index];
                                 return ProfessionalDeviceCard(
+                                  key: ValueKey(device.id),
                                   device: device,
                                   onTrackTap: () {
                                     context.pushTo(
@@ -903,7 +925,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          device.deviceType,
+                          deviceTypeLabel(device.deviceType),
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: Colors.grey),
                         ),
@@ -914,26 +936,33 @@ class WirelessScannerScreen extends HookConsumerWidget {
               ),
               const Divider(height: 24),
               DetailRow(
-                label: 'Hardware Manufacturer',
-                value: device.manufacturer,
+                label: 'scan_detail_manufacturer'.tr(),
+                value: manufacturerLabel(device.manufacturer),
               ),
-              DetailRow(label: 'MAC Address (ID)', value: device.id),
-              DetailRow(label: 'RSSI Signal', value: '${device.rssi} dBm'),
               DetailRow(
-                label: 'Tx Power Level',
+                label: 'scan_detail_mac'.tr(),
+                value: device.id,
+                monospace: true,
+              ),
+              DetailRow(
+                label: 'scan_detail_rssi'.tr(),
+                value: '${device.rssi} dBm',
+              ),
+              DetailRow(
+                label: 'scan_detail_tx_power'.tr(),
                 value: device.txPower != null
                     ? '${device.txPower} dBm'
-                    : 'Not Advertised',
+                    : 'scan_detail_not_advertised'.tr(),
               ),
               DetailRow(
-                label: 'Connection Capability',
+                label: 'scan_detail_connection'.tr(),
                 value: device.isConnectable
-                    ? 'Connectable Peripheral'
-                    : 'Broadcast Beacon',
+                    ? 'scan_detail_connectable'.tr()
+                    : 'scan_detail_broadcast_only'.tr(),
               ),
               if (device.serviceUuids.isNotEmpty)
                 DetailRow(
-                  label: 'Service UUIDs',
+                  label: 'scan_detail_services'.tr(),
                   value: device.serviceUuids.join(', '),
                 ),
               if (device.isConnectable &&
@@ -948,7 +977,7 @@ class WirelessScannerScreen extends HookConsumerWidget {
                       onConnect();
                     },
                     icon: const Icon(Icons.link_rounded),
-                    label: const Text('Connect & Read Device Info'),
+                    label: Text('scan_connect_read_info'.tr()),
                   ),
                 ),
               ],

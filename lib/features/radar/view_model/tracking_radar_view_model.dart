@@ -4,14 +4,25 @@ import 'dart:math' as math;
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/audio/geiger_buzzer_service.dart';
+import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
+import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/repository/radar_repository.dart';
+import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 
 class TrackingRadarState {
   final ScannedDeviceModel? device;
-  final double distanceMeters;
-  final int rssi;
+
+  /// Estimated distance from the smoothed RSSI; null until the first live
+  /// packet arrives.
+  final double? distanceMeters;
+
+  /// Last raw RSSI received while tracking; null until the first packet.
+  final int? rssi;
+
+  /// Smoothed RSSI that distance, threat and trend are computed from.
+  final double? smoothedRssi;
   final ThreatLevel threatLevel;
   final ProximityTrend trend;
   final List<int> rssiHistory;
@@ -20,152 +31,224 @@ class TrackingRadarState {
   /// True when the target has not advertised for [TrackingRadarViewModel.signalLostAfter].
   final bool isSignalLost;
 
+  /// Translation key of the reason the Bluetooth scan could not start or
+  /// failed; null while scanning normally.
+  final String? errorKey;
+
   const TrackingRadarState({
     this.device,
-    this.distanceMeters = 0.0,
-    this.rssi = -100,
+    this.distanceMeters,
+    this.rssi,
+    this.smoothedRssi,
     this.threatLevel = ThreatLevel.low,
     this.trend = ProximityTrend.stationary,
     this.rssiHistory = const [],
     this.isAudioAlertEnabled = true,
     this.isSignalLost = false,
+    this.errorKey,
   });
+
+  /// Waiting for the first live packet from the target.
+  bool get isAcquiring =>
+      device != null &&
+      smoothedRssi == null &&
+      errorKey == null &&
+      !isSignalLost;
+
+  /// Distance, threat and trend reflect a current measurement.
+  bool get hasLiveSignal =>
+      smoothedRssi != null && !isSignalLost && errorKey == null;
 
   TrackingRadarState copyWith({
     ScannedDeviceModel? device,
-    double? distanceMeters,
-    int? rssi,
+    double? Function()? distanceMeters,
+    int? Function()? rssi,
+    double? Function()? smoothedRssi,
     ThreatLevel? threatLevel,
     ProximityTrend? trend,
     List<int>? rssiHistory,
     bool? isAudioAlertEnabled,
     bool? isSignalLost,
+    String? Function()? errorKey,
   }) {
     return TrackingRadarState(
       device: device ?? this.device,
-      distanceMeters: distanceMeters ?? this.distanceMeters,
-      rssi: rssi ?? this.rssi,
+      distanceMeters: distanceMeters != null
+          ? distanceMeters()
+          : this.distanceMeters,
+      rssi: rssi != null ? rssi() : this.rssi,
+      smoothedRssi: smoothedRssi != null ? smoothedRssi() : this.smoothedRssi,
       threatLevel: threatLevel ?? this.threatLevel,
       trend: trend ?? this.trend,
       rssiHistory: rssiHistory ?? this.rssiHistory,
       isAudioAlertEnabled: isAudioAlertEnabled ?? this.isAudioAlertEnabled,
       isSignalLost: isSignalLost ?? this.isSignalLost,
+      errorKey: errorKey != null ? errorKey() : this.errorKey,
     );
   }
 
-  /// Calculates BLE distance using Log-Distance Path Loss model
+  /// Typical RSSI of a phone-class transmitter at 1 m.
+  static const int defaultRssiAt1m = -59;
+
+  /// Expected RSSI at 1 m. The BLE TX Power Level is measured at 0 m, and
+  /// free-space loss over the first metre at 2.4 GHz is about 41 dB.
+  static int rssiAt1m(int? txPower) {
+    if (txPower == null || txPower < -30 || txPower > 20) {
+      return defaultRssiAt1m;
+    }
+    return txPower - 41;
+  }
+
+  /// Log-distance path loss estimate, in metres.
   static double calculateDistance(
-    int rssi, {
-    int txPower = -59,
+    double rssi, {
+    int rssiAt1m = defaultRssiAt1m,
     double n = 2.5,
   }) {
-    if (rssi == 0) return -1.0;
-    final ratio = (txPower - rssi) / (10 * n);
-    final distance = math.pow(10, ratio).toDouble();
-    return double.parse(distance.toStringAsFixed(2));
+    final ratio = (rssiAt1m - rssi) / (10 * n);
+    return math.pow(10, ratio).toDouble();
   }
 
-  /// Determines Threat Level based on RSSI
-  static ThreatLevel calculateThreat(int rssi) {
-    if (rssi > -60) {
-      return ThreatLevel.critical;
-    } else if (rssi > -75) {
-      return ThreatLevel.high;
-    } else if (rssi > -88) {
-      return ThreatLevel.medium;
-    } else {
-      return ThreatLevel.low;
-    }
-  }
-
-  /// Dynamic Proximity Trend calculation comparing current RSSI against moving average
-  static ProximityTrend calculateTrend(int currentRssi, List<int> history) {
-    if (history.length < 2) return ProximityTrend.stationary;
-    final sub = history.length > 4
-        ? history.sublist(history.length - 4, history.length - 1)
-        : history.sublist(0, history.length - 1);
-    final avgPrev = sub.reduce((a, b) => a + b) / sub.length;
-
-    final diff = currentRssi - avgPrev;
-
-    if (diff >= 1.2) {
-      return ProximityTrend.approaching;
-    } else if (diff <= -1.2) {
-      return ProximityTrend.receding;
-    } else {
-      return ProximityTrend.stationary;
-    }
+  /// RSSI distance is rough (±50 % or worse), so show one decimal at most.
+  static String formatDistance(double? meters) {
+    if (meters == null) return '--';
+    if (meters >= 10) return '>10 m';
+    return '≈${meters.toStringAsFixed(1)} m';
   }
 }
 
 /// Live hot/cold tracking of one BLE device. Listens to every advertisement
-/// from the target, so distance and trend update in real time.
+/// from the target; distance, threat and trend come from smoothed RSSI.
 class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   static const Duration signalLostAfter = Duration(seconds: 5);
+  static const int _historyLength = 20;
 
   late RadarRepository _repository;
   late GeigerBuzzerService _buzzer;
+  late AppLogger _logger;
+  final RssiTrendFilter _filter = RssiTrendFilter();
   StreamSubscription<RadarSignal>? _sub;
   Timer? _lostTimer;
+  DateTime _lastPacketAt = DateTime.now();
+
+  /// True while another screen (e.g. the incident form) covers the radar.
+  bool _alertsSuspended = false;
 
   @override
   TrackingRadarState build() {
     _repository = ref.watch(radarRepositoryProvider);
     _buzzer = ref.watch(geigerBuzzerProvider);
+    _logger = ref.watch(appLoggerProvider);
     ref.onDispose(_stop);
     return const TrackingRadarState();
   }
 
-  void setTargetDevice(ScannedDeviceModel device) {
+  /// Starts tracking [device]. The scanner's last RSSI is stale, so nothing
+  /// is shown until the first live packet arrives.
+  Future<void> setTargetDevice(ScannedDeviceModel device) async {
     if (state.device?.id == device.id) return;
-
-    state = state.copyWith(
+    state = TrackingRadarState(
       device: device,
-      distanceMeters: TrackingRadarState.calculateDistance(device.rssi),
-      rssi: device.rssi,
-      threatLevel: TrackingRadarState.calculateThreat(device.rssi),
-      trend: ProximityTrend.stationary,
-      rssiHistory: [device.rssi],
-      isSignalLost: false,
+      isAudioAlertEnabled: state.isAudioAlertEnabled,
     );
-
-    _sub?.cancel();
-    _sub = _repository
-        .watchDevice(device.id)
-        .listen((s) => updateDeviceSignal(s.rssi, s.timestamp));
-    _repository.startTracking();
-    _updateBuzzer();
-
     _lostTimer?.cancel();
     _lostTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final target = state.device;
-      if (!ref.mounted || target == null) return;
-      final lost = DateTime.now().difference(target.lastSeen) > signalLostAfter;
-      if (lost != state.isSignalLost) {
-        state = state.copyWith(isSignalLost: lost);
-        _updateBuzzer();
-      }
+      _checkSignalLost();
     });
+    await _startTracking();
+  }
+
+  /// Restarts the scan after an error.
+  Future<void> retry() async {
+    if (state.device == null) return;
+    state = state.copyWith(errorKey: () => null, isSignalLost: false);
+    await _startTracking();
+  }
+
+  Future<void> _startTracking() async {
+    final device = state.device;
+    if (device == null) return;
+    _filter.reset();
+    _lastPacketAt = DateTime.now();
+
+    await _sub?.cancel();
+    _sub = _repository
+        .watchDevice(device.id)
+        .listen(
+          (s) => updateDeviceSignal(s.rssi, s.timestamp),
+          onError: (Object e, StackTrace st) {
+            _logger.warning('Radar scan error', e, st);
+            _fail(
+              e is BleScanException ? scanErrorKey(e) : 'radar_err_scan_failed',
+            );
+          },
+        );
+    _updateBuzzer();
+
+    try {
+      await _repository.startTracking();
+    } on BleScanException catch (e) {
+      _logger.warning('Radar scan failed to start', e);
+      _fail(scanErrorKey(e));
+    } catch (e, st) {
+      _logger.error('Radar could not start scanning', e, st);
+      _fail('radar_err_scan_start');
+    }
+  }
+
+  /// Translation key for a scan failure reported by the Bluetooth service.
+  static String scanErrorKey(BleScanException e) {
+    if (e.code == BleScanError.locationOff) return 'radar_err_location_off';
+    if (e.code == BleScanError.throttled) return 'radar_err_scan_throttled';
+    return 'radar_err_scan_failed';
+  }
+
+  void _fail(String errorKey) {
+    if (!ref.mounted) return;
+    state = state.copyWith(
+      errorKey: () => errorKey,
+      trend: ProximityTrend.stationary,
+    );
+    _updateBuzzer();
+  }
+
+  void _checkSignalLost() {
+    if (!ref.mounted || state.device == null) return;
+    final lost = DateTime.now().difference(_lastPacketAt) > signalLostAfter;
+    if (lost == state.isSignalLost) return;
+    state = state.copyWith(
+      isSignalLost: lost,
+      trend: lost ? ProximityTrend.stationary : null,
+    );
+    _updateBuzzer();
   }
 
   void updateDeviceSignal(int rssi, [DateTime? timeStamp]) {
-    if (!ref.mounted || state.device == null) return;
-    final updatedDevice = state.device!.copyWith(
-      rssi: rssi,
-      lastSeen: timeStamp ?? DateTime.now(),
+    final device = state.device;
+    if (!ref.mounted || device == null) return;
+    final at = timeStamp ?? DateTime.now();
+    _lastPacketAt = DateTime.now();
+
+    _filter.add(rssi, at);
+    final smoothed = _filter.smoothed!;
+    final distance = TrackingRadarState.calculateDistance(
+      smoothed,
+      rssiAt1m: TrackingRadarState.rssiAt1m(device.txPower),
     );
 
     final newHistory = [...state.rssiHistory, rssi];
-    if (newHistory.length > 20) newHistory.removeAt(0);
+    if (newHistory.length > _historyLength) newHistory.removeAt(0);
 
     state = state.copyWith(
-      device: updatedDevice,
-      distanceMeters: TrackingRadarState.calculateDistance(rssi),
-      rssi: rssi,
-      threatLevel: TrackingRadarState.calculateThreat(rssi),
-      trend: TrackingRadarState.calculateTrend(rssi, newHistory),
+      device: device.copyWith(rssi: rssi, lastSeen: at),
+      distanceMeters: () => distance,
+      rssi: () => rssi,
+      smoothedRssi: () => smoothed,
+      threatLevel: ThreatLevel.fromDistance(distance),
+      trend: _filter.trend,
       rssiHistory: newHistory,
       isSignalLost: false,
+      errorKey: () => null,
     );
     _updateBuzzer();
   }
@@ -175,12 +258,39 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _updateBuzzer();
   }
 
-  /// Beeps faster as the inspector gets closer; silent when the signal is lost.
+  /// Silences the buzzer while another screen is on top (e.g. the incident
+  /// form) and resumes it afterwards.
+  void setAlertsSuspended(bool suspended) {
+    _alertsSuspended = suspended;
+    if (ref.mounted) {
+      _updateBuzzer();
+    } else if (suspended) {
+      _buzzer.stopBuzzer();
+    }
+  }
+
+  /// Evidence for the incident form.
+  String incidentNotes() {
+    final device = state.device;
+    final name = device?.displayName ?? 'unknown device';
+    if (!state.hasLiveSignal) {
+      return 'Radar: $name — no live signal when logged.';
+    }
+    return 'Radar: $name estimated '
+        '${TrackingRadarState.formatDistance(state.distanceMeters)} away '
+        '(smoothed RSSI ${state.smoothedRssi!.round()} dBm, '
+        '${state.threatLevel.label}).';
+  }
+
+  /// Beeps faster as the inspector gets closer; silent without a live signal.
   void _updateBuzzer() {
+    final distance = state.distanceMeters;
     if (state.isAudioAlertEnabled &&
-        !state.isSignalLost &&
-        state.distanceMeters > 0) {
-      _buzzer.updateTargetDistance(state.distanceMeters);
+        !_alertsSuspended &&
+        state.hasLiveSignal &&
+        distance != null &&
+        distance > 0) {
+      _buzzer.updateTargetDistance(distance);
     } else {
       _buzzer.stopBuzzer();
     }
@@ -190,7 +300,9 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _lostTimer?.cancel();
     _sub?.cancel();
     _buzzer.stopBuzzer();
-    _repository.stopTracking();
+    _repository.stopTracking().catchError((Object e, StackTrace st) {
+      _logger.warning('Radar could not stop scanning', e, st);
+    });
   }
 }
 

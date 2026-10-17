@@ -7,6 +7,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
+import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/radar/view_model/tracking_radar_view_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -42,7 +43,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
       case ProximityTrend.receding:
         return const Color(0xFFEF4444); // Red (Moving Away)
       case ProximityTrend.stationary:
-        return const Color(0xFF3B82F6); // Blue (Position Locked)
+        return const Color(0xFF3B82F6); // Blue (No clear change)
     }
   }
 
@@ -57,10 +58,26 @@ class TrackingRadarScreen extends HookConsumerWidget {
     }
   }
 
+  /// Localized version of [TrackingRadarState.formatDistance].
+  static String _formatDistance(double? meters) {
+    if (meters == null) return '--';
+    if (meters >= 10) return 'radar_distance_far'.tr(args: {'meters': '10'});
+    return 'radar_distance_approx'.tr(
+      args: {'meters': meters.toStringAsFixed(1)},
+    );
+  }
+
+  static String _trimMeters(double meters) => meters == meters.roundToDouble()
+      ? meters.toStringAsFixed(0)
+      : meters.toStringAsFixed(1);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final radarState = ref.watch(trackingRadarViewModelProvider);
     final radarNotifier = ref.read(trackingRadarViewModelProvider.notifier);
+    final colorScheme = Theme.of(context).colorScheme;
+    final secondaryText = colorScheme.onSurfaceVariant;
+    final neutralColor = colorScheme.outline;
 
     // Initialize target device when screen mounts or targetDevice changes
     useEffect(() {
@@ -73,12 +90,77 @@ class TrackingRadarScreen extends HookConsumerWidget {
     // Radar beam rotation animation controller
     final beamController = useAnimationController(
       duration: const Duration(seconds: 3),
-    )..repeat();
+    );
+    useEffect(() {
+      beamController.repeat();
+      return null;
+    }, [beamController]);
 
     final activeDevice = radarState.device ?? targetDevice;
-    final threatColor = _getThreatColor(radarState.threatLevel);
-    final trendColor = _getTrendColor(radarState.trend);
-    final trendIcon = _getTrendIcon(radarState.trend);
+    final isLive = radarState.hasLiveSignal;
+    final threatColor = isLive
+        ? _getThreatColor(radarState.threatLevel)
+        : neutralColor;
+    final trendColor = isLive ? _getTrendColor(radarState.trend) : neutralColor;
+    final trendIcon = isLive
+        ? _getTrendIcon(radarState.trend)
+        : (radarState.errorKey != null
+              ? Icons.bluetooth_disabled_rounded
+              : Icons.bluetooth_searching_rounded);
+
+    final String trendTitle;
+    final String trendText;
+    if (radarState.errorKey != null) {
+      trendTitle = 'radar_scan_failed_title'.tr();
+      trendText = radarState.errorKey!.tr();
+    } else if (radarState.isSignalLost) {
+      trendTitle = 'radar_signal_lost_title'.tr();
+      trendText = 'radar_signal_lost_text'.tr();
+    } else if (radarState.isAcquiring) {
+      trendTitle = 'radar_acquiring_title'.tr();
+      trendText = 'radar_acquiring_text'.tr();
+    } else {
+      trendTitle = radarState.trend.labelKey.tr();
+      trendText = radarState.trend.instructionKey.tr();
+    }
+
+    final String threatTitle;
+    final String threatText;
+    if (isLive) {
+      threatTitle = radarState.threatLevel.labelKey.tr();
+      threatText = radarState.threatLevel.descriptionKey.tr();
+    } else if (radarState.errorKey != null) {
+      threatTitle = 'radar_not_measuring'.tr();
+      threatText = 'radar_not_measuring_text'.tr();
+    } else if (radarState.isSignalLost) {
+      threatTitle = 'radar_no_live_signal'.tr();
+      threatText = 'radar_no_live_signal_text'.tr();
+    } else {
+      threatTitle = 'radar_acquiring'.tr();
+      threatText = 'radar_acquiring_distance_text'.tr();
+    }
+
+    final distanceText = _formatDistance(radarState.distanceMeters);
+    final ringLabels = [
+      for (final m in RadarPainter.ringMeters)
+        (m == RadarPainter.maxMeters
+                ? 'radar_ring_meters_max'
+                : 'radar_ring_meters')
+            .tr(args: {'meters': _trimMeters(m)}),
+    ];
+
+    Future<void> logIncident(ScannedDeviceModel device) async {
+      radarNotifier.setAlertsSuspended(true);
+      await context.pushTo(
+        AppRoute.actionNew,
+        extra: ActionEntryArgs(
+          device: device,
+          category: 'Bluetooth Device',
+          notes: radarNotifier.incidentNotes(),
+        ),
+      );
+      if (context.mounted) radarNotifier.setAlertsSuspended(false);
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -86,7 +168,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
         actions: [
           IconButton(
             icon: Icon(Icons.help_outline_rounded, size: 24.w),
-            tooltip: 'Direction Finding Guide',
+            tooltip: 'radar_guide_title'.tr(),
             onPressed: () => _showDirectionGuideModal(context),
           ),
           IconButton(
@@ -95,7 +177,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
                   ? Icons.volume_up_rounded
                   : Icons.volume_off_rounded,
             ),
-            tooltip: 'Toggle Audio Alert',
+            tooltip: 'radar_audio_tooltip'.tr(),
             onPressed: () => radarNotifier.toggleAudioAlert(),
           ),
           const AppSettingsMenu(),
@@ -112,24 +194,24 @@ class TrackingRadarScreen extends HookConsumerWidget {
                       Icon(
                         Icons.radar_outlined,
                         size: 64.w,
-                        color: Colors.grey.shade400,
+                        color: neutralColor,
                       ),
                       SizedBox(height: 16.h),
                       Text(
-                        'No Target Device Selected',
+                        'radar_no_target_title'.tr(),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       SizedBox(height: 8.h),
                       Text(
-                        'Select a device from the Wireless Scanner to begin live radar tracking.',
+                        'radar_no_target_text'.tr(),
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyMedium
-                            ?.copyWith(color: Colors.grey),
+                            ?.copyWith(color: secondaryText),
                       ),
                       SizedBox(height: 24.h),
                       PrimaryButton(
-                        label: 'Open Wireless Scanner',
-                        onPressed: () => context.goTo(AppRoute.scanner),
+                        label: 'open_scanner'.tr(),
+                        onPressed: () => context.pushTo(AppRoute.scanner),
                       ),
                     ],
                   ),
@@ -168,9 +250,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      radarState.isSignalLost
-                                          ? 'SIGNAL LOST — NO ADVERTISEMENT FOR 5s'
-                                          : radarState.trend.label,
+                                      trendTitle,
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
@@ -181,20 +261,25 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                           ),
                                     ),
                                     Text(
-                                      radarState.isSignalLost
-                                          ? 'Device stopped transmitting or moved out of range.'
-                                          : radarState.trend.instruction,
+                                      trendText,
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
                                           ?.copyWith(
                                             fontSize: 10.sp,
-                                            color: Colors.grey.shade700,
+                                            color: secondaryText,
                                           ),
                                     ),
                                   ],
                                 ),
                               ),
+                              if (radarState.errorKey != null) ...[
+                                SizedBox(width: 8.w),
+                                OutlinedButton(
+                                  onPressed: radarNotifier.retry,
+                                  child: Text('radar_retry'.tr()),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -222,7 +307,9 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                   color: threatColor,
                                 ),
                                 child: Icon(
-                                  Icons.warning_amber_rounded,
+                                  isLive
+                                      ? Icons.warning_amber_rounded
+                                      : Icons.help_outline_rounded,
                                   color: Colors.white,
                                   size: 20.w,
                                 ),
@@ -233,7 +320,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      radarState.threatLevel.label,
+                                      threatTitle,
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleSmall
@@ -244,13 +331,11 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                     ),
                                     SizedBox(height: 2.h),
                                     Text(
-                                      radarState.threatLevel.description,
+                                      threatText,
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
-                                          ?.copyWith(
-                                            color: Colors.grey.shade700,
-                                          ),
+                                          ?.copyWith(color: secondaryText),
                                     ),
                                   ],
                                 ),
@@ -260,7 +345,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
                         ),
                         SizedBox(height: AppDimens.spacingLarge),
 
-                        // Radar Visual Display Map with Distance Meters Labels & Direction Vector
+                        // Distance-only radar display
                         AspectRatio(
                           aspectRatio: 1.0,
                           child: Card(
@@ -279,10 +364,20 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                     painter: RadarPainter(
                                       sweepAngle:
                                           beamController.value * 2 * math.pi,
-                                      rssi: radarState.rssi,
-                                      distanceMeters: radarState.distanceMeters,
-                                      threatColor: threatColor,
-                                      trend: radarState.trend,
+                                      distanceMeters: isLive
+                                          ? radarState.distanceMeters
+                                          : null,
+                                      color: threatColor,
+                                      badgeLabel: isLive
+                                          ? '${radarState.threatLevel.labelKey.tr()} · '
+                                                '$distanceText'
+                                          : null,
+                                      ringLabels: ringLabels,
+                                      note: 'radar_distance_only'.tr(),
+                                      textDirection: Directionality.of(context),
+                                      gridColor: colorScheme.primary,
+                                      labelColor: secondaryText,
+                                      badgeTextColor: Colors.white,
                                     ),
                                     child: Center(
                                       child: Column(
@@ -295,7 +390,12 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                           ),
                                           SizedBox(height: 2.h),
                                           Text(
-                                            '~${radarState.distanceMeters}m',
+                                            isLive
+                                                ? distanceText
+                                                : (radarState.isAcquiring
+                                                      ? 'radar_acquiring_center'
+                                                            .tr()
+                                                      : '--'),
                                             style: Theme.of(context)
                                                 .textTheme
                                                 .titleLarge
@@ -305,14 +405,16 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                                 ),
                                           ),
                                           Text(
-                                            '${radarState.rssi} dBm',
+                                            radarState.smoothedRssi == null
+                                                ? '-- dBm'
+                                                : '${radarState.smoothedRssi!.round()} dBm',
                                             style: Theme.of(context)
                                                 .textTheme
                                                 .labelMedium
                                                 ?.copyWith(
                                                   fontFamily: 'monospace',
                                                   fontSize: 11.sp,
-                                                  color: Colors.grey.shade600,
+                                                  color: secondaryText,
                                                 ),
                                           ),
                                         ],
@@ -338,51 +440,25 @@ class TrackingRadarScreen extends HookConsumerWidget {
                             padding: EdgeInsets.all(AppDimens.spacingMedium),
                             child: Column(
                               children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Target Name',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(color: Colors.grey),
-                                    ),
-                                    Text(
-                                      activeDevice.name,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                  ],
+                                _InfoRow(
+                                  label: 'radar_target_name'.tr(),
+                                  value: activeDevice.displayName,
+                                  valueStyle: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
                                 ),
                                 const Divider(height: 16),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'MAC Address',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(color: Colors.grey),
-                                    ),
-                                    Text(
-                                      activeDevice.id,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            fontFamily: 'monospace',
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                  ],
+                                _InfoRow(
+                                  label: 'device_id'.tr(),
+                                  value: activeDevice.id,
+                                  valueStyle: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                 ),
                               ],
                             ),
@@ -392,13 +468,8 @@ class TrackingRadarScreen extends HookConsumerWidget {
 
                         // Action Buttons
                         PrimaryButton(
-                          label: 'Log Violation Incident',
-                          onPressed: () {
-                            context.pushTo(
-                              AppRoute.actionNew,
-                              extra: activeDevice,
-                            );
-                          },
+                          label: 'log_incident'.tr(),
+                          onPressed: () => logIncident(activeDevice),
                         ),
                       ],
                     ),
@@ -451,14 +522,18 @@ class TrackingRadarScreen extends HookConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Direction Finding & Triangulation Guide',
+                              'radar_guide_title'.tr(),
                               style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              'ব্লুটুথ ডিভাইসের সঠিক দিক ও সীমানা খুঁজে বের করার নিয়ম',
+                              'radar_guide_subtitle'.tr(),
                               style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: Colors.grey),
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
                             ),
                           ],
                         ),
@@ -468,26 +543,36 @@ class TrackingRadarScreen extends HookConsumerWidget {
                   const Divider(height: 24),
                   DirectionStepItem(
                     stepNumber: '1',
-                    title: '১. হলের সাড়িতে হাঁটা শুরু করুন (Walking & Signal Direction)',
-                    description: 'পরীক্ষা হলের কোনো একটি সারি ধরে সামনের দিকে হাঁটা শুরু করুন। অ্যাপের ওপরের ব্যানারটি লক্ষ্য করুন।',
+                    title: 'radar_guide_step1_title'.tr(),
+                    description: 'radar_guide_step1_text'.tr(),
                     icon: Icons.directions_walk_rounded,
                   ),
                   DirectionStepItem(
                     stepNumber: '2',
-                    title:
-                        '২. সিগন্যাল ডিরেকশন কালার বোঝা (Green vs Red vs Blue)',
-                    description: '• সবুজ (APPROACHING): সঠিক দিকে এগোচ্ছেন (দূরত্ব কমছে)।\n• লাল (RECEDING): ভুল দিকে যাচ্ছেন, উল্টো ঘুরে দাঁড়ান।\n• নীল (STATIONARY LOCK): আপনি বর্তমান দূরত্বে অবস্থান করছেন। এবার মোবাইলটি ডানে-বামে সুইপ করে নির্দিষ্ট বেঞ্চ নিশ্চিত করুন।',
+                    title: 'radar_guide_step2_title'.tr(),
+                    description: 'radar_guide_step2_text'.tr(
+                      args: {
+                        'closer': ProximityTrend.approaching.labelKey.tr(),
+                        'away': ProximityTrend.receding.labelKey.tr(),
+                        'steady': ProximityTrend.stationary.labelKey.tr(),
+                      },
+                    ),
                     icon: Icons.alt_route_rounded,
                   ),
                   DirectionStepItem(
                     stepNumber: '3',
-                    title: '৩. সঠিক সিট/পরীক্ষার্থী নিশ্চিতকরণ (Pinpoint Desk Location)',
-                    description: 'যখন ডিস্ট্যান্স ~১.৫ মিটারের নিচে নামবে এবং সিগন্যাল CRITICAL (> -60 dBm) দেখাবে, তখন ডানে ও বামের সিটের দিকে ফোন এগিয়ে ধরুন। সবচেয়ে শক্তিশালী সিগন্যালের সিটটিই চূড়ান্ত থ্রেট।',
+                    title: 'radar_guide_step3_title'.tr(),
+                    description: 'radar_guide_step3_text'.tr(
+                      args: {
+                        'critical': ThreatLevel.critical.labelKey.tr(),
+                        'meters': _trimMeters(ThreatLevel.criticalWithin),
+                      },
+                    ),
                     icon: Icons.pin_drop_rounded,
                   ),
                   SizedBox(height: AppDimens.spacingMedium),
                   PrimaryButton(
-                    label: 'Got it! Start Radar Guidance',
+                    label: 'radar_guide_done'.tr(),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -496,6 +581,41 @@ class TrackingRadarScreen extends HookConsumerWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// Label on the left, value on the right; long values (e.g. 36-char iOS
+/// device ids) are ellipsized instead of overflowing.
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value, this.valueStyle});
+
+  final String label;
+  final String value;
+  final TextStyle? valueStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+        SizedBox(width: 12.w),
+        Flexible(
+          child: Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: Text(
+              value,
+              style: valueStyle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -28,8 +28,9 @@ class AppLocalization extends StatelessWidget {
 }
 
 extension AppTranslateExtension on String {
-  /// The translation for this key in the current locale.
-  String tr() => easy.tr(this);
+  /// The translation for this key in the current locale. Placeholders are
+  /// written `{name}` in the JSON files and filled from [args].
+  String tr({Map<String, String>? args}) => easy.tr(this, namedArgs: args);
 }
 
 extension AppLocaleContext on BuildContext {

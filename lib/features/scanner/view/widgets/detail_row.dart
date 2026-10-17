@@ -2,9 +2,17 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:flutter/material.dart';
 
 class DetailRow extends StatelessWidget {
-  const DetailRow({super.key, required this.label, required this.value});
+  const DetailRow({
+    super.key,
+    required this.label,
+    required this.value,
+    this.monospace = false,
+  });
   final String label;
   final String value;
+
+  /// Shows [value] in a fixed-width font (e.g. MAC addresses).
+  final bool monospace;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +32,7 @@ class DetailRow extends StatelessWidget {
               textAlign: TextAlign.end,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.bold,
-                fontFamily: label.contains('MAC') ? 'monospace' : null,
+                fontFamily: monospace ? 'monospace' : null,
               ),
             ),
           ),

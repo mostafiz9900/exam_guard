@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
@@ -21,49 +22,107 @@ import 'package:exam_guard/features/dashboard/view/widgets/live_stat_badge.dart'
 import 'package:exam_guard/features/dashboard/view/widgets/dashboard_module_card.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/live_threat_tile.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/mini_sweep_painter.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/signal_strength.dart';
+
+/// Scanner status as the dashboard shows it.
+enum _ScanStatus { live, bluetoothOff, failed, stopped }
+
+_ScanStatus _scanStatusOf(ScannerState s) {
+  if (s.isBluetoothOff) return _ScanStatus.bluetoothOff;
+  if (s.errorMessage != null) return _ScanStatus.failed;
+  if (s.isScanning) return _ScanStatus.live;
+  return _ScanStatus.stopped;
+}
+
+/// Ordered magnetic levels: critical and above red, elevated orange.
+Color _magneticColor(MagneticHazardLevel level) {
+  if (level.index >= MagneticHazardLevel.critical.index) return Colors.red;
+  if (level == MagneticHazardLevel.elevated) return Colors.orange;
+  return Colors.teal;
+}
+
+enum _ExitChoice { minimize, endExam }
 
 class DashboardScreen extends HookConsumerWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Watch live state providers
-    final scannerState = ref.watch(scannerViewModelProvider);
-    final magneticState = ref.watch(magneticViewModelProvider);
+    // Only rarely-changing state is watched here; live readouts (clock,
+    // devices, magnetic field) rebuild in their own small widgets below.
     final session = ref.watch(sessionViewModelProvider);
+    final isScanning = ref.watch(
+      scannerViewModelProvider.select((s) => s.isScanning),
+    );
 
     final room = session?.roomNumber.isNotEmpty == true
-        ? 'Room ${session!.roomNumber}'
-        : 'No active session';
-
-    final institute = session?.instituteName.isNotEmpty == true
-        ? session!.instituteName
-        : '-';
+        ? 'room'.tr(args: {'room': session!.roomNumber})
+        : 'no_active_session'.tr();
 
     final colors = Theme.of(context).colorScheme;
-
-    // Live ticking time hook
-    final now = useState(DateTime.now());
-    useEffect(() {
-      final timer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => now.value = DateTime.now(),
-      );
-      return timer.cancel;
-    }, const []);
+    final appBarForeground =
+        Theme.of(context).appBarTheme.foregroundColor ?? colors.onPrimary;
 
     // Live radar animation controller
     final sweepController = useAnimationController(
       duration: const Duration(seconds: 3),
-    )..repeat();
+    );
+    useEffect(() {
+      sweepController.repeat();
+      return null;
+    }, [sweepController]);
 
-    final activeDevices = scannerState.activeDevices;
-    final highThreatCount = activeDevices.where((d) => d.rssi > -65).length;
+    /// Ends the exam and opens its report. Stays on the dashboard with an
+    /// error message if the end time could not be saved.
+    Future<void> finishExam() async {
+      try {
+        await ref.read(sessionViewModelProvider.notifier).endCurrentSession();
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('end_exam_failed'.tr()),
+              backgroundColor: colors.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+      if (context.mounted) context.goTo(AppRoute.report);
+    }
 
-    Future<bool> showExitConfirmationDialog() async {
-      final shouldExit = await showDialog<bool>(
+    Future<void> endExam() async {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('end_exam_title'.tr()),
+          content: Text('end_exam_message'.tr()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('cancel'.tr()),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('end_exam'.tr()),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      await finishExam();
+    }
+
+    Future<_ExitChoice?> showExitDialog() {
+      return showDialog<_ExitChoice>(
         context: context,
         builder: (context) {
+          final dialogColors = Theme.of(context).colorScheme;
           return AlertDialog(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppDimens.radiusLarge),
@@ -73,18 +132,18 @@ class DashboardScreen extends HookConsumerWidget {
                 Container(
                   padding: EdgeInsets.all(8.w),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade100,
+                    color: dialogColors.primaryContainer,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.exit_to_app_rounded,
-                    color: Colors.red,
+                    color: dialogColors.onPrimaryContainer,
                   ),
                 ),
                 SizedBox(width: 10.w),
                 Expanded(
                   child: Text(
-                    'Exit ExamGuard?',
+                    'exit_dialog_title'.tr(),
                     style: TextStyle(
                       fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
@@ -98,7 +157,7 @@ class DashboardScreen extends HookConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Are you sure all exam hall security checks are completed?',
+                  'exit_dialog_message'.tr(),
                   style: TextStyle(
                     fontSize: 13.sp,
                     fontWeight: FontWeight.bold,
@@ -106,99 +165,97 @@ class DashboardScreen extends HookConsumerWidget {
                 ),
                 SizedBox(height: 8.h),
                 Text(
-                  'Exiting now will stop active BLE signal & magnetic spectrum monitoring.',
+                  'exit_dialog_hint'.tr(),
                   style: TextStyle(
                     fontSize: 12.sp,
-                    color: Colors.grey.shade700,
+                    color: dialogColors.onSurfaceVariant,
                   ),
                 ),
               ],
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel / Continue Scan'),
+                onPressed: () => Navigator.pop(context),
+                child: Text('cancel'.tr()),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, _ExitChoice.minimize),
+                child: Text('minimize'.tr()),
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('All Checks Done & Exit'),
+                onPressed: () => Navigator.pop(context, _ExitChoice.endExam),
+                child: Text('end_exam_and_report'.tr()),
               ),
             ],
           );
         },
       );
-      return shouldExit ?? false;
-    }
-
-    Future<void> endExam() async {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('End exam session?'),
-          content: const Text(
-            'The end time will be recorded and the session report will open.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('End Exam'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-      await ref.read(sessionViewModelProvider.notifier).endCurrentSession();
-      if (context.mounted) context.goTo(AppRoute.report);
     }
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        final shouldExit = await showExitConfirmationDialog();
-        if (shouldExit) {
-          SystemNavigator.pop();
+        switch (await showExitDialog()) {
+          case _ExitChoice.minimize:
+            SystemNavigator.pop();
+          case _ExitChoice.endExam:
+            await finishExam();
+          case null:
+            break;
         }
       },
       child: Scaffold(
         appBar: AppBar(
           title: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.shield_rounded, color: colors.primary, size: 22.w),
+              Icon(Icons.shield_rounded, color: appBarForeground, size: 22.w),
               SizedBox(width: 8.w),
-              const Text('ExamGuard Security'),
+              Flexible(
+                child: Text(
+                  'dashboard'.tr(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           actions: [
             IconButton(
               icon: Icon(
-                Icons.cell_wifi_rounded,
-                color: scannerState.isScanning ? colors.primary : Colors.grey,
+                isScanning
+                    ? Icons.cell_wifi_rounded
+                    : Icons.portable_wifi_off_rounded,
+                color: isScanning
+                    ? appBarForeground
+                    : appBarForeground.withValues(alpha: 0.6),
               ),
-              tooltip: scannerState.isScanning
-                  ? 'Scanner Active'
-                  : 'Scanner Idle',
+              tooltip: isScanning ? 'scanner_active'.tr() : 'scanner_idle'.tr(),
               onPressed: () => context.pushTo(AppRoute.scanner),
             ),
             if (session != null && session.endTime == null)
-              TextButton.icon(
-                onPressed: endExam,
-                icon: const Icon(Icons.stop_circle_rounded, color: Colors.red),
-                label: const Text(
-                  'End Exam',
-                  style: TextStyle(color: Colors.red),
+              Padding(
+                padding: EdgeInsetsDirectional.only(start: 4.w),
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.red.shade700,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(horizontal: 10.w),
+                    minimumSize: Size(0, 34.h),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: endExam,
+                  icon: Icon(Icons.stop_circle_rounded, size: 18.w),
+                  label: Text(
+                    'end_exam'.tr(),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             const AppSettingsMenu(),
@@ -257,16 +314,17 @@ class DashboardScreen extends HookConsumerWidget {
                                           child: Stack(
                                             alignment: Alignment.center,
                                             children: [
-                                              CustomPaint(
-                                                size: Size(52.w, 52.w),
-                                                painter: MiniSweepPainter(
-                                                  angle:
-                                                      sweepController.value *
-                                                      2 *
-                                                      math.pi,
-                                                  color: colors.primary,
+                                              if (isScanning)
+                                                CustomPaint(
+                                                  size: Size(52.w, 52.w),
+                                                  painter: MiniSweepPainter(
+                                                    angle:
+                                                        sweepController.value *
+                                                        2 *
+                                                        math.pi,
+                                                    color: colors.primary,
+                                                  ),
                                                 ),
-                                              ),
                                               Icon(
                                                 Icons.radar_rounded,
                                                 size: 26.w,
@@ -285,70 +343,37 @@ class DashboardScreen extends HookConsumerWidget {
                                         children: [
                                           Row(
                                             children: [
-                                              Text(
-                                                room,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .titleLarge
-                                                    ?.copyWith(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 16.sp,
-                                                    ),
-                                              ),
-                                              SizedBox(width: 6.w),
-                                              Container(
-                                                padding: EdgeInsets.symmetric(
-                                                  horizontal: 8.w,
-                                                  vertical: 2.h,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.success
-                                                      .withValues(alpha: 0.15),
-                                                  borderRadius:
-                                                      BorderRadius.circular(
-                                                        10.r,
-                                                      ),
-                                                ),
-                                                child: Row(
-                                                  children: [
-                                                    Container(
-                                                      width: 6.w,
-                                                      height: 6.w,
-                                                      decoration:
-                                                          const BoxDecoration(
-                                                            color: AppColors
-                                                                .success,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                          ),
-                                                    ),
-                                                    SizedBox(width: 4.w),
-                                                    Text(
-                                                      'MONITORING ONLINE',
-                                                      style: TextStyle(
-                                                        fontSize: 9.sp,
+                                              Flexible(
+                                                child: Text(
+                                                  room,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .titleLarge
+                                                      ?.copyWith(
                                                         fontWeight:
                                                             FontWeight.bold,
-                                                        color:
-                                                            AppColors.success,
+                                                        fontSize: 16.sp,
                                                       ),
-                                                    ),
-                                                  ],
                                                 ),
+                                              ),
+                                              SizedBox(width: 6.w),
+                                              const Flexible(
+                                                child: _ScanStatusChip(),
                                               ),
                                             ],
                                           ),
                                           SizedBox(height: 2.h),
-                                          Text(
-                                            '$institute • ${AppDateFormat.clock(now.value)}',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                  color: Colors.grey.shade600,
-                                                  fontSize: 11.sp,
-                                                ),
+                                          _InstituteClock(
+                                            institute:
+                                                session
+                                                        ?.instituteName
+                                                        .isNotEmpty ==
+                                                    true
+                                                ? session!.instituteName
+                                                : '-',
                                           ),
                                         ],
                                       ),
@@ -361,44 +386,57 @@ class DashboardScreen extends HookConsumerWidget {
                                 Row(
                                   children: [
                                     Expanded(
-                                      child: LiveStatBadge(
-                                        icon: Icons.cell_wifi_rounded,
-                                        title: 'BLE Signals',
-                                        value: '${activeDevices.length}',
-                                        color: colors.primary,
-                                        onTap: () =>
-                                            context.pushTo(AppRoute.scanner),
+                                      child: Consumer(
+                                        builder: (context, ref, _) {
+                                          final count = ref.watch(
+                                            scannerViewModelProvider.select(
+                                              (s) => s.activeDevices.length,
+                                            ),
+                                          );
+                                          return LiveStatBadge(
+                                            icon: Icons.cell_wifi_rounded,
+                                            title: 'ble_signals'.tr(),
+                                            value: '$count',
+                                            color: colors.primary,
+                                            onTap: () => context.pushTo(
+                                              AppRoute.scanner,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                     SizedBox(width: 8.w),
                                     Expanded(
-                                      child: LiveStatBadge(
-                                        icon: Icons.warning_amber_rounded,
-                                        title: 'High Threats',
-                                        value: '$highThreatCount',
-                                        color: highThreatCount > 0
-                                            ? Colors.red
-                                            : Colors.orange,
-                                        onTap: () =>
-                                            context.pushTo(AppRoute.scanner),
+                                      child: Consumer(
+                                        builder: (context, ref, _) {
+                                          final strong = ref.watch(
+                                            scannerViewModelProvider.select(
+                                              (s) => s.activeDevices
+                                                  .where(
+                                                    (d) =>
+                                                        SignalStrength.isStrong(
+                                                          d.rssi,
+                                                        ),
+                                                  )
+                                                  .length,
+                                            ),
+                                          );
+                                          return LiveStatBadge(
+                                            icon: Icons.warning_amber_rounded,
+                                            title: 'strong_signals'.tr(),
+                                            value: '$strong',
+                                            color: strong > 0
+                                                ? Colors.red
+                                                : colors.onSurfaceVariant,
+                                            onTap: () => context.pushTo(
+                                              AppRoute.scanner,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                     SizedBox(width: 8.w),
-                                    Expanded(
-                                      child: LiveStatBadge(
-                                        icon: Icons.sensors_rounded,
-                                        title: 'Magnetic EMP',
-                                        value:
-                                            '${magneticState.magnitude.toStringAsFixed(1)} μT',
-                                        color:
-                                            magneticState.hazardLevel ==
-                                                MagneticHazardLevel.critical
-                                            ? Colors.red
-                                            : Colors.teal,
-                                        onTap: () =>
-                                            context.pushTo(AppRoute.magnetic),
-                                      ),
-                                    ),
+                                    const Expanded(child: _MagneticStatBadge()),
                                   ],
                                 ),
                               ],
@@ -407,9 +445,8 @@ class DashboardScreen extends HookConsumerWidget {
                         ),
                         SizedBox(height: AppDimens.spacingLarge),
 
-                        // Section Title: Tactical Navigation Deck
                         Text(
-                          'Tactical Security Modules',
+                          'quick_actions'.tr(),
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(
                                 fontWeight: FontWeight.bold,
@@ -427,55 +464,82 @@ class DashboardScreen extends HookConsumerWidget {
                           mainAxisSpacing: AppDimens.spacingMedium,
                           childAspectRatio: 1.15,
                           children: [
-                            DashboardModuleCard(
-                              icon: Icons.cell_wifi_rounded,
-                              title: 'Wireless BLE Scanner',
-                              subtitle:
-                                  'Detect bluetooth earpieces & hidden bugs',
-                              badgeText: '${activeDevices.length} Active',
-                              color: colors.primary,
-                              onTap: () => context.pushTo(AppRoute.scanner),
+                            Consumer(
+                              builder: (context, ref, _) {
+                                final count = ref.watch(
+                                  scannerViewModelProvider.select(
+                                    (s) => s.activeDevices.length,
+                                  ),
+                                );
+                                return DashboardModuleCard(
+                                  icon: Icons.cell_wifi_rounded,
+                                  title: 'wireless_scan'.tr(),
+                                  subtitle: 'wireless_scan_subtitle'.tr(),
+                                  badgeText: 'devices_active'.tr(
+                                    args: {'count': '$count'},
+                                  ),
+                                  color: colors.primary,
+                                  onTap: () => context.pushTo(AppRoute.scanner),
+                                );
+                              },
                             ),
                             DashboardModuleCard(
                               icon: Icons.radar_rounded,
-                              title: '360° Tracking Radar',
-                              subtitle: 'Live multi-target radar map & 1-on-1 tracking',
-                              badgeText: 'Multi-Radar',
+                              title: 'tracking_radar'.tr(),
+                              subtitle: 'tracking_radar_subtitle'.tr(),
+                              badgeText: 'radar_badge'.tr(),
                               color: Colors.teal,
                               onTap: () => context.pushTo(AppRoute.radar),
                             ),
-                            DashboardModuleCard(
-                              icon: Icons.sensors_rounded,
-                              title: 'Magnetic EMP Detector',
-                              subtitle:
-                                  'Find hidden metal bugs & magnetic signals',
-                              badgeText:
-                                  '${magneticState.magnitude.toStringAsFixed(0)} μT',
-                              color: Colors.indigo,
-                              onTap: () => context.pushTo(AppRoute.magnetic),
+                            Consumer(
+                              builder: (context, ref, _) {
+                                // Whole μT only, so this rebuilds far less
+                                // often than the ~10 Hz sensor stream.
+                                final reading = ref.watch(
+                                  magneticViewModelProvider.select(
+                                    (s) => s.hasReading
+                                        ? s.magnitude.round()
+                                        : null,
+                                  ),
+                                );
+                                return DashboardModuleCard(
+                                  icon: Icons.sensors_rounded,
+                                  title: 'magnetic_scan'.tr(),
+                                  subtitle: 'magnetic_scan_subtitle'.tr(),
+                                  badgeText: reading == null
+                                      ? '—'
+                                      : '$reading μT',
+                                  color: Colors.indigo,
+                                  onTap: () =>
+                                      context.pushTo(AppRoute.magnetic),
+                                );
+                              },
                             ),
                             DashboardModuleCard(
-                              icon: Icons.assignment_turned_in_rounded,
-                              title: 'Session Setup',
-                              subtitle: 'Configure room boundary & parameters',
-                              badgeText: room,
+                              icon: Icons.assignment_rounded,
+                              title: 'report'.tr(),
+                              subtitle: 'report_card_subtitle'.tr(),
+                              badgeText: 'incidents_count'.tr(
+                                args: {
+                                  'count': '${session?.deviceLogs.length ?? 0}',
+                                },
+                              ),
                               color: Colors.blueGrey,
-                              onTap: () => context.goTo(AppRoute.sessionSetup),
+                              onTap: () => context.pushTo(AppRoute.report),
                             ),
                             DashboardModuleCard(
                               icon: Icons.settings_input_antenna_rounded,
-                              title: 'Live RF Activity Meter',
-                              subtitle: 'Live 2.4 GHz transmitter strength & ESP32 node',
+                              title: 'rf_meter'.tr(),
+                              subtitle: 'rf_meter_subtitle'.tr(),
                               badgeText: '2.4 GHz',
                               color: Colors.deepOrange,
                               onTap: () => context.pushTo(AppRoute.rfDetector),
                             ),
                             DashboardModuleCard(
                               icon: Icons.report_problem_rounded,
-                              title: 'Log Incident Report',
-                              subtitle:
-                                  'Record cheating & unauthorized devices',
-                              badgeText: 'Action',
+                              title: 'log_incident'.tr(),
+                              subtitle: 'log_incident_subtitle'.tr(),
+                              badgeText: 'log_action'.tr(),
                               color: Colors.redAccent,
                               onTap: () => context.pushTo(AppRoute.actionNew),
                             ),
@@ -485,15 +549,18 @@ class DashboardScreen extends HookConsumerWidget {
 
                         // Section Title: Live Discovered Threats Stream
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              'Live Discovered Feed',
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13.sp,
-                                  ),
+                            Expanded(
+                              child: Text(
+                                'live_feed'.tr(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13.sp,
+                                    ),
+                              ),
                             ),
                             TextButton.icon(
                               onPressed: () => context.pushTo(AppRoute.scanner),
@@ -502,68 +569,221 @@ class DashboardScreen extends HookConsumerWidget {
                                 size: 14.w,
                               ),
                               label: Text(
-                                'View Scanner',
+                                'view_scanner'.tr(),
                                 style: TextStyle(fontSize: 11.sp),
                               ),
                             ),
                           ],
                         ),
                         SizedBox(height: 4.h),
-
-                        // Live Devices Stream Card List
-                        activeDevices.isEmpty
-                            ? Card(
-                                elevation: 1,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    AppDimens.radiusMedium,
-                                  ),
-                                ),
-                                child: Padding(
-                                  padding: EdgeInsets.all(
-                                    AppDimens.spacingLarge,
-                                  ),
-                                  child: Center(
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.bluetooth_searching_rounded,
-                                          size: 32.w,
-                                          color: Colors.grey.shade400,
-                                        ),
-                                        SizedBox(height: 8.h),
-                                        Text(
-                                          'Scanning live BLE frequencies...',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(color: Colors.grey),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              )
-                            : Column(
-                                children: activeDevices.take(3).map((device) {
-                                  return Padding(
-                                    padding: EdgeInsets.only(bottom: 6.h),
-                                    child: LiveThreatTile(
-                                      device: device,
-                                      onTrackTap: () => context.pushTo(
-                                        AppRoute.radar,
-                                        extra: device,
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
+                        const _LiveDeviceFeed(),
                       ],
                     ),
                   ),
                 ),
               );
             },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Institute name and a ticking clock. Owns its own timer so the rest of
+/// the dashboard doesn't rebuild every second.
+class _InstituteClock extends HookWidget {
+  const _InstituteClock({required this.institute});
+
+  final String institute;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = useState(DateTime.now());
+    useEffect(() {
+      final timer = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => now.value = DateTime.now(),
+      );
+      return timer.cancel;
+    }, const []);
+
+    return Text(
+      '$institute • ${AppDateFormat.clock(now.value)}',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 11.sp,
+      ),
+    );
+  }
+}
+
+/// Shows whether BLE monitoring is really running. Tappable when it isn't,
+/// so the invigilator can fix it in the scanner.
+class _ScanStatusChip extends ConsumerWidget {
+  const _ScanStatusChip();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(scannerViewModelProvider.select(_scanStatusOf));
+    final (label, color) = switch (status) {
+      _ScanStatus.live => ('status_monitoring_live'.tr(), AppColors.success),
+      _ScanStatus.bluetoothOff => ('status_bluetooth_off'.tr(), Colors.red),
+      _ScanStatus.failed => ('status_scan_failed'.tr(), Colors.red),
+      _ScanStatus.stopped => ('status_scan_stopped'.tr(), Colors.red),
+    };
+    final isLive = status == _ScanStatus.live;
+
+    final chip = Container(
+      padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10.r),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6.w,
+            height: 6.w,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          SizedBox(width: 4.w),
+          Flexible(
+            child: Text(
+              label.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 9.sp,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ),
+          if (!isLive) ...[
+            SizedBox(width: 2.w),
+            Icon(Icons.chevron_right_rounded, size: 12.w, color: color),
+          ],
+        ],
+      ),
+    );
+
+    if (isLive) return chip;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10.r),
+      onTap: () => context.pushTo(AppRoute.scanner),
+      child: chip,
+    );
+  }
+}
+
+/// Magnetic field readout; rebuilds only when the shown value changes.
+class _MagneticStatBadge extends ConsumerWidget {
+  const _MagneticStatBadge();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final (hasReading, tenths, level) = ref.watch(
+      magneticViewModelProvider.select(
+        (s) => (s.hasReading, (s.magnitude * 10).round(), s.hazardLevel),
+      ),
+    );
+    return LiveStatBadge(
+      icon: Icons.sensors_rounded,
+      title: 'magnetic_field'.tr(),
+      value: hasReading ? '${(tenths / 10).toStringAsFixed(1)} μT' : '—',
+      color: hasReading
+          ? _magneticColor(level)
+          : Theme.of(context).colorScheme.onSurfaceVariant,
+      onTap: () => context.pushTo(AppRoute.magnetic),
+    );
+  }
+}
+
+/// Top three nearby devices, or an honest empty state that says why the
+/// list is empty.
+class _LiveDeviceFeed extends ConsumerWidget {
+  const _LiveDeviceFeed();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(scannerViewModelProvider.select(_scanStatusOf));
+    final devices = ref.watch(
+      scannerViewModelProvider.select((s) => s.activeDevices),
+    );
+    final colors = Theme.of(context).colorScheme;
+
+    if (devices.isNotEmpty) {
+      return Column(
+        children: devices.take(3).map((device) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: 6.h),
+            child: LiveThreatTile(
+              device: device,
+              onTrackTap: () => context.pushTo(AppRoute.radar, extra: device),
+            ),
+          );
+        }).toList(),
+      );
+    }
+
+    final (icon, message, isProblem) = switch (status) {
+      _ScanStatus.live => (
+        Icons.bluetooth_searching_rounded,
+        'scanning'.tr(),
+        false,
+      ),
+      _ScanStatus.bluetoothOff => (
+        Icons.bluetooth_disabled_rounded,
+        'feed_bluetooth_off'.tr(),
+        true,
+      ),
+      _ScanStatus.failed => (
+        Icons.error_outline_rounded,
+        'scan_unavailable'.tr(),
+        true,
+      ),
+      _ScanStatus.stopped => (
+        Icons.pause_circle_outline_rounded,
+        'feed_scan_stopped'.tr(),
+        true,
+      ),
+    };
+
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(AppDimens.spacingLarge),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                size: 32.w,
+                color: isProblem ? colors.error : colors.outline,
+              ),
+              SizedBox(height: 8.h),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: colors.onSurfaceVariant),
+              ),
+              if (isProblem) ...[
+                SizedBox(height: 8.h),
+                OutlinedButton.icon(
+                  onPressed: () => context.pushTo(AppRoute.scanner),
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: Text('open_scanner'.tr()),
+                ),
+              ],
+            ],
           ),
         ),
       ),

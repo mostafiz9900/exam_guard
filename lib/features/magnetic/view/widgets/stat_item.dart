@@ -20,7 +20,7 @@ class StatItem extends StatelessWidget {
         Text(
           label,
           style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: Colors.grey),
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         SizedBox(height: 2.h),
         Text(

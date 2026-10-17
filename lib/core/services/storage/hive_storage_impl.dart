@@ -15,7 +15,8 @@ class HiveStorageImpl implements ILocalStorage {
   }
 
   @override
-  Future<void> write(String key, Object? value) => _box.put(key, value);
+  Future<void> write(String key, Object? value) =>
+      _guard(() => _box.put(key, value));
 
   @override
   T? read<T>(String key) {
@@ -24,11 +25,19 @@ class HiveStorageImpl implements ILocalStorage {
   }
 
   @override
-  Future<void> delete(String key) => _box.delete(key);
+  Future<void> delete(String key) => _guard(() => _box.delete(key));
 
   @override
   Iterable<String> get keys => _box.keys.whereType<String>();
 
   @override
   Future<void> dispose() => _box.close();
+
+  Future<void> _guard(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e, st) {
+      Error.throwWithStackTrace(StorageException(e), st);
+    }
+  }
 }

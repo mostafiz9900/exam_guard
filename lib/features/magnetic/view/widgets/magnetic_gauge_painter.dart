@@ -7,11 +7,15 @@ class MagneticGaugePainter extends CustomPainter {
     required this.magnitude,
     required this.angle,
     required this.color,
+    required this.trackColor,
   });
 
   final double magnitude;
   final double angle;
   final Color color;
+
+  /// Background ring colour; pass a theme-derived colour.
+  final Color trackColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -20,7 +24,7 @@ class MagneticGaugePainter extends CustomPainter {
 
     // Background track ring
     final bgPaint = Paint()
-      ..color = Colors.grey.shade200
+      ..color = trackColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10;
     canvas.drawCircle(center, radius - 8, bgPaint);
@@ -58,6 +62,9 @@ class MagneticGaugePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant MagneticGaugePainter oldDelegate) {
-    return oldDelegate.magnitude != magnitude || oldDelegate.angle != angle;
+    return oldDelegate.magnitude != magnitude ||
+        oldDelegate.angle != angle ||
+        oldDelegate.color != color ||
+        oldDelegate.trackColor != trackColor;
   }
 }

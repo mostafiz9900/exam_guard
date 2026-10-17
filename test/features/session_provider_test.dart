@@ -91,4 +91,50 @@ void main() {
       expect(all.single.deviceLogs.single.severity, LogSeverity.high);
     },
   );
+
+  test('a corrupt session entry is skipped instead of crashing', () async {
+    final storage = InMemoryStorage()
+      ..values['current_session_id'] = 'bad'
+      ..values['last_session_id'] = 'bad'
+      // `id` missing and wrong types: SessionModel.fromJson throws.
+      ..values['session_bad'] = <dynamic, dynamic>{
+        'instituteName': 42,
+        'startTime': 'x',
+      };
+    final container = ProviderContainer(
+      overrides: [localStorageProvider.overrideWithValue(storage)],
+    );
+    addTearDown(container.dispose);
+
+    expect(container.read(sessionViewModelProvider), isNull);
+    final repository = container.read(sessionRepositoryProvider);
+    expect(repository.lastSession(), isNull);
+    expect(repository.allSessions(), isEmpty);
+  });
+
+  test('pointer write failures do not fail the save', () async {
+    final storage = _PointerFailingStorage();
+    final container = ProviderContainer(
+      overrides: [localStorageProvider.overrideWithValue(storage)],
+    );
+    addTearDown(container.dispose);
+
+    await container
+        .read(sessionViewModelProvider.notifier)
+        .createSession(instituteName: 'S', teacherName: 'T', roomNumber: '1');
+
+    expect(storage.values.keys.where((k) => k.startsWith('session_')), hasLength(1));
+    expect(container.read(sessionViewModelProvider)?.roomNumber, '1');
+  });
+}
+
+/// Stores sessions but fails to write the pointer keys.
+class _PointerFailingStorage extends InMemoryStorage {
+  @override
+  Future<void> write(String key, Object? value) async {
+    if (key.endsWith('_session_id')) {
+      throw const StorageException('disk full');
+    }
+    await super.write(key, value);
+  }
 }

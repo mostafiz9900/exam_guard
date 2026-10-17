@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_loader.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -26,18 +25,27 @@ class PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textColor = foregroundColor ?? colors.onPrimary;
+    final enabled = !isLoading && onPressed != null;
+    final labelText = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.bodyLarge
+          ?.copyWith(color: enabled ? textColor : colors.onSurfaceVariant),
+    );
+
     return SizedBox(
       width: double.infinity,
       height: height ?? AppDimens.buttonHeight,
       child: ElevatedButton(
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor:
-              backgroundColor ?? Theme.of(context).colorScheme.primary,
-          foregroundColor:
-              foregroundColor ?? Theme.of(context).colorScheme.onPrimary,
-          disabledBackgroundColor: AppColors.disabled,
-          disabledForegroundColor: AppColors.textLowEmphasis,
+          backgroundColor: backgroundColor ?? colors.primary,
+          foregroundColor: textColor,
+          disabledBackgroundColor: colors.surfaceContainerHighest,
+          disabledForegroundColor: colors.onSurfaceVariant,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppDimens.radiusLarge),
           ),
@@ -49,31 +57,17 @@ class PrimaryButton extends StatelessWidget {
                   SizedBox(
                     width: 18.w,
                     height: 18.w,
-                    child: const AppLoader.ring(
-                      color: AppColors.onPrimary,
+                    child: AppLoader.ring(
+                      color: colors.onSurfaceVariant,
                       lineWidth: 2,
                       size: 18,
                     ),
                   ),
                   SizedBox(width: AppDimens.spacingSmall),
-                  Text(
-                    'Please wait...',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color:
-                          foregroundColor ??
-                          Theme.of(context).colorScheme.onPrimary,
-                    ),
-                  ),
+                  Flexible(child: labelText),
                 ],
               )
-            : Text(
-                label,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color:
-                      foregroundColor ??
-                      Theme.of(context).colorScheme.onPrimary,
-                ),
-              ),
+            : labelText,
       ),
     );
   }

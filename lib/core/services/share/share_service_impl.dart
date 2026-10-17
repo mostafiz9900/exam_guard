@@ -1,10 +1,16 @@
 import 'dart:typed_data';
+import 'dart:ui' show Rect;
 
 import 'package:share_plus/share_plus.dart';
 
+import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/share/i_share_service.dart';
 
 class ShareServiceImpl implements IShareService {
+  ShareServiceImpl(this._logger);
+
+  final AppLogger _logger;
+
   @override
   Future<ShareOutcome> shareFile({
     required Uint8List bytes,
@@ -12,24 +18,37 @@ class ShareServiceImpl implements IShareService {
     required String mimeType,
     String? subject,
     String? text,
-  }) async {
-    final result = await SharePlus.instance.share(
+    Rect? origin,
+  }) {
+    final name = safeFileName(fileName);
+    return _share(
       ShareParams(
-        files: [XFile.fromData(bytes, mimeType: mimeType, name: fileName)],
-        fileNameOverrides: [fileName],
+        files: [XFile.fromData(bytes, mimeType: mimeType, name: name)],
+        fileNameOverrides: [name],
         subject: subject,
         text: text,
+        sharePositionOrigin: origin,
       ),
     );
-    return _map(result.status);
   }
 
   @override
-  Future<ShareOutcome> shareText(String text, {String? subject}) async {
-    final result = await SharePlus.instance.share(
-      ShareParams(text: text, subject: subject),
-    );
-    return _map(result.status);
+  Future<ShareOutcome> shareText(
+    String text, {
+    String? subject,
+    Rect? origin,
+  }) => _share(
+    ShareParams(text: text, subject: subject, sharePositionOrigin: origin),
+  );
+
+  Future<ShareOutcome> _share(ShareParams params) async {
+    try {
+      final result = await SharePlus.instance.share(params);
+      return _map(result.status);
+    } catch (e, st) {
+      _logger.error('Opening the share sheet failed', e, st);
+      throw ShareFailedException(e);
+    }
   }
 
   ShareOutcome _map(ShareResultStatus status) => switch (status) {

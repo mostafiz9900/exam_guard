@@ -1,9 +1,23 @@
+/// Proximity band derived from the estimated distance to the target.
 enum ThreatLevel {
   critical,
   high,
   medium,
   low;
 
+  /// Upper distance bound of each band, in metres.
+  static const double criticalWithin = 1.5;
+  static const double highWithin = 3.5;
+  static const double mediumWithin = 6.0;
+
+  static ThreatLevel fromDistance(double meters) {
+    if (meters <= criticalWithin) return ThreatLevel.critical;
+    if (meters <= highWithin) return ThreatLevel.high;
+    if (meters <= mediumWithin) return ThreatLevel.medium;
+    return ThreatLevel.low;
+  }
+
+  /// English label, used in saved incident records (official record).
   String get label {
     switch (this) {
       case ThreatLevel.critical:
@@ -17,39 +31,24 @@ enum ThreatLevel {
     }
   }
 
-  String get description {
-    switch (this) {
-      case ThreatLevel.critical:
-        return 'Target is within 1.5 meters. High risk of active transmission.';
-      case ThreatLevel.high:
-        return 'Target is within 1.5 - 3.5 meters of inspector.';
-      case ThreatLevel.medium:
-        return 'Target is within 3.5 - 6 meters range.';
-      case ThreatLevel.low:
-        return 'Target signal is weak or far away (>6 meters).';
-    }
-  }
+  /// Translation key for the on-screen label.
+  String get labelKey => 'radar_threat_$name';
+
+  /// Translation key for the on-screen description.
+  String get descriptionKey => 'radar_threat_${name}_desc';
 }
 
 enum ProximityTrend {
-  approaching(
-    'APPROACHING TARGET (GETTING CLOSER)',
-    'Distance decreasing! Step forward towards candidate.',
-    true,
-  ),
-  receding(
-    'RECEDING (MOVING AWAY)',
-    'Distance increasing! Turn 180° around or change aisle.',
-    false,
-  ),
-  stationary(
-    'STATIONARY LOCK (HOLD POSITION)',
-    'Distance locked (±0.2m). Sweep phone left/right to pinpoint desk.',
-    null,
-  );
+  approaching(true),
+  receding(false),
+  stationary(null);
 
-  const ProximityTrend(this.label, this.instruction, this.isCloser);
-  final String label;
-  final String instruction;
+  const ProximityTrend(this.isCloser);
   final bool? isCloser;
+
+  /// Translation key for the on-screen label.
+  String get labelKey => 'radar_trend_$name';
+
+  /// Translation key for what the inspector should do next.
+  String get instructionKey => 'radar_trend_${name}_hint';
 }

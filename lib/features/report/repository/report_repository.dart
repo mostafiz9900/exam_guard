@@ -1,3 +1,5 @@
+import 'dart:ui' show Rect;
+
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/pdf/i_pdf_service.dart';
@@ -13,23 +15,30 @@ class ReportRepository {
   final IPdfService _pdf;
   final IShareService _share;
 
-  Future<ShareOutcome> exportSessionPdf(SessionModel session) async {
+  Future<ShareOutcome> exportSessionPdf(
+    SessionModel session, {
+    Rect? origin,
+  }) async {
     final bytes = await _pdf.buildTableDocument(_document(session));
     return _share.shareFile(
       bytes: bytes,
-      fileName:
-          'examguard_room_${session.roomNumber}_${AppDateFormat.date(session.startTime)}.pdf',
+      fileName: reportFileName(session),
       mimeType: 'application/pdf',
-      subject: 'ExamGuard report — Room ${session.roomNumber}',
+      subject: 'ExamGuard report — Room ${_orDash(session.roomNumber)}',
+      origin: origin,
     );
   }
+
+  /// e.g. `examguard_room_12_B_2026-10-13.pdf` for room "12/B".
+  static String reportFileName(SessionModel session) => safeFileName(
+    'examguard_room_${session.roomNumber}_${AppDateFormat.date(session.startTime)}.pdf',
+  );
+
+  static String _orDash(String v) => v.trim().isEmpty ? '-' : v;
 
   PdfTableDocument _document(SessionModel session) {
     final logs = session.deviceLogs;
     int count(LogSeverity s) => logs.where((l) => l.severity == s).length;
-    final duration = (session.endTime ?? DateTime.now()).difference(
-      session.startTime,
-    );
 
     return PdfTableDocument(
       title: 'ExamGuard — Exam Security Session Report',
@@ -41,8 +50,7 @@ class ReportRepository {
         'Ended': session.endTime == null
             ? 'In progress'
             : AppDateFormat.fullDateTime(session.endTime!),
-        'Duration':
-            '${duration.inHours}h ${(duration.inMinutes % 60).toString().padLeft(2, '0')}m',
+        'Duration': AppDateFormat.duration(session.duration),
       },
       summary:
           'Incidents: ${logs.length}  ·  '
@@ -63,10 +71,10 @@ class ReportRepository {
           [
             AppDateFormat.clock(l.createdAt),
             l.severity.code,
-            l.deviceName,
-            l.deviceId,
-            l.location,
-            l.notes,
+            _orDash(l.deviceName),
+            _orDash(l.deviceId),
+            _orDash(l.location),
+            _orDash(l.notes),
           ],
       ],
       emptyTableText: 'No incidents were logged during this session.',
