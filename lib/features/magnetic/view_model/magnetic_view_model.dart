@@ -50,6 +50,19 @@ class MagneticState {
 
   bool get hasReading => isHardwareSensorActive;
 
+  /// The phone has no (working) magnetometer: magnetic scanning is not
+  /// possible on this device. Distinct from "waiting" (sensor starting) and
+  /// "paused" (stopped by the user).
+  bool get isSensorUnavailable =>
+      errorKey == MagneticViewModel.noSensorErrorKey;
+
+  /// Sensor started but no reading yet.
+  bool get isWaitingForSensor =>
+      isScanning && !isHardwareSensorActive && errorKey == null;
+
+  /// Stopped by the user.
+  bool get isPaused => !isScanning && errorKey == null;
+
   /// Readings are real only while the sensor is running and delivering.
   bool get isLive => isScanning && isHardwareSensorActive && errorKey == null;
 
@@ -251,8 +264,10 @@ class MagneticViewModel extends Notifier<MagneticState> {
       },
     );
 
+    // No reading at all: this phone almost certainly has no magnetometer.
+    // Keep listening, so a merely slow sensor still comes live by itself.
     _noSensorTimer = Timer(_noSensorTimeout, () {
-      if (!state.isHardwareSensorActive) _markUnavailable();
+      if (!state.isHardwareSensorActive) _markUnavailable(keepListening: true);
     });
   }
 
@@ -320,6 +335,7 @@ class MagneticViewModel extends Notifier<MagneticState> {
       peakHazard: _peakHazard,
       isScanning: true,
       isHardwareSensorActive: true,
+      errorKey: () => null,
     );
     _resetPending();
     _updateBuzzer();
@@ -334,9 +350,14 @@ class MagneticViewModel extends Notifier<MagneticState> {
 
   static double _round(double v) => double.parse(v.toStringAsFixed(1));
 
-  void _markUnavailable() {
+  void _markUnavailable({bool keepListening = false}) {
     if (!ref.mounted) return;
-    _cancel();
+    if (keepListening) {
+      _noSensorTimer?.cancel();
+      _noSensorTimer = null;
+    } else {
+      _cancel();
+    }
     state = state.copyWith(
       isScanning: false,
       isHardwareSensorActive: false,

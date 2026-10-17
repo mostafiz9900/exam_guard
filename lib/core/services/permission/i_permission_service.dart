@@ -11,6 +11,10 @@ abstract interface class IPermissionService {
 
   /// Opens the OS settings page for this app.
   Future<bool> openSettings();
+
+  /// Opens the system Location settings (Android). Returns false where that
+  /// isn't possible.
+  Future<bool> openLocationSettings();
 }
 
 final permissionServiceProvider = Provider<IPermissionService>(

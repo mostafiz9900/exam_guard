@@ -22,6 +22,12 @@ class DashboardModuleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Deep accent hues (indigo, blue-grey) are hard to read on dark
+    // surfaces; lighten them there so badge text stays legible.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = isDark
+        ? Color.lerp(this.color, Colors.white, 0.35)!
+        : this.color;
     return Card(
       elevation: 2,
       clipBehavior: Clip.antiAlias,
@@ -40,7 +46,7 @@ class DashboardModuleCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(8.0),
+                    padding: EdgeInsets.all(8.w),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.15),
                       shape: BoxShape.circle,

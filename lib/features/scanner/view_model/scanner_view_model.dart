@@ -5,8 +5,14 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
+import 'package:exam_guard/features/scanner/model/scanned_device_group.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/repository/scanner_repository.dart';
+import 'package:exam_guard/features/scanner/view_model/device_filter.dart';
+import 'package:exam_guard/features/scanner/view_model/device_grouping.dart';
+
+export 'package:exam_guard/features/scanner/model/scanned_device_group.dart';
+export 'package:exam_guard/features/scanner/view_model/device_filter.dart';
 
 enum RoomSizePreset {
   small('scan_room_small', -75),
@@ -20,40 +26,120 @@ enum RoomSizePreset {
   final int rssiThreshold;
 }
 
+/// Why the scanner list is empty, so the screen can say what to do.
+enum ScannerEmptyReason {
+  /// Android needs Location on to return BLE results.
+  locationOff,
+  bluetoothOff,
+
+  /// A blocking problem in [ScannerState.errorMessage].
+  error,
+
+  /// Scanning, nothing has advertised yet.
+  waiting,
+
+  /// Scanning is stopped and nothing was found.
+  paused,
+
+  /// Devices were found but the room boundary hides all of them.
+  outsideBoundary,
+
+  /// Devices are in range but the selected filter matches none.
+  filteredOut,
+}
+
 class ScannerState {
-  final bool isScanning;
-  final List<ScannedDeviceModel> devices;
-  final bool isRoomBoundaryMode;
-  final RoomSizePreset roomSizePreset;
-  final bool isBluetoothOff;
-
-  /// Translation key of the current error, or null when there is none.
-  final String? errorMessage;
-
-  /// Placeholder values for [errorMessage].
-  final Map<String, String> errorArgs;
-
-  const ScannerState({
+  ScannerState({
     this.isScanning = false,
     this.devices = const [],
     this.isRoomBoundaryMode = false,
     this.roomSizePreset = RoomSizePreset.medium,
     this.isBluetoothOff = false,
+    this.isLocationOff = false,
     this.errorMessage,
     this.errorArgs = const {},
+    this.noticeKey,
+    this.noticeArgs = const {},
+    this.noticeId = 0,
   });
 
-  /// Returns list filtered by Room Boundary limit when active
-  List<ScannedDeviceModel> get activeDevices {
-    if (!isRoomBoundaryMode) return devices;
-    return devices
-        .where((d) => d.rssi >= roomSizePreset.rssiThreshold)
-        .toList();
-  }
+  /// True while the scan owner is registered. It stays true while
+  /// [isLocationOff]; the scan then resumes by itself.
+  final bool isScanning;
+
+  /// Every address heard recently (one entry per BLE address).
+  final List<ScannedDeviceModel> devices;
+  final bool isRoomBoundaryMode;
+  final RoomSizePreset roomSizePreset;
+  final bool isBluetoothOff;
+
+  /// Location (GPS) is off, so Android returns no BLE results. The scan
+  /// keeps its place and resumes once Location is turned on.
+  final bool isLocationOff;
+
+  /// Translation key of a blocking scan problem (permission, Bluetooth
+  /// off/unsupported, scan failed), or null when scanning can work.
+  final String? errorMessage;
+
+  /// Placeholder values for [errorMessage].
+  final Map<String, String> errorArgs;
+
+  /// Translation key of the latest one-off message (e.g. a failed
+  /// connection) to show once, e.g. in a snackbar. Never blocks scanning.
+  final String? noticeKey;
+
+  /// Placeholder values for [noticeKey].
+  final Map<String, String> noticeArgs;
+
+  /// Increases with every new notice, so a repeated identical notice can
+  /// still be told apart from the previous one.
+  final int noticeId;
+
+  /// Devices left after the room boundary filter (one per address).
+  late final List<ScannedDeviceModel> activeDevices = isRoomBoundaryMode
+      ? devices.where((d) => d.rssi >= roomSizePreset.rssiThreshold).toList()
+      : devices;
+
+  /// [devices] with addresses that likely belong to one device grouped.
+  late final List<ScannedDeviceGroup> groups = groupLikelySameDevices(devices);
+
+  /// [groups] after the room boundary filter; members outside the
+  /// boundary are left out of each group.
+  late final List<ScannedDeviceGroup> activeGroups = isRoomBoundaryMode
+      ? [
+          for (final g in groups)
+            if (g.members.any(_insideBoundary))
+              ScannedDeviceGroup(g.members.where(_insideBoundary).toList()),
+        ]
+      : groups;
+
+  bool _insideBoundary(ScannedDeviceModel d) =>
+      d.rssi >= roomSizePreset.rssiThreshold;
 
   /// Returns list of successfully connected target devices
   List<ScannedDeviceModel> get connectedDevices {
     return devices.where((d) => d.isConnected).toList();
+  }
+
+  /// Groups shown for [filter]; a group is matched on its primary.
+  List<ScannedDeviceGroup> visibleGroups(DeviceFilter filter) => [
+    for (final g in activeGroups)
+      if (filter.matches(g.primary)) g,
+  ];
+
+  /// Why nothing is shown for [filter], or null when something is.
+  ScannerEmptyReason? emptyReason(DeviceFilter filter) {
+    if (visibleGroups(filter).isNotEmpty) return null;
+    if (isLocationOff) return ScannerEmptyReason.locationOff;
+    if (isBluetoothOff) return ScannerEmptyReason.bluetoothOff;
+    if (errorMessage != null) return ScannerEmptyReason.error;
+    if (devices.isEmpty) {
+      return isScanning
+          ? ScannerEmptyReason.waiting
+          : ScannerEmptyReason.paused;
+    }
+    if (activeDevices.isEmpty) return ScannerEmptyReason.outsideBoundary;
+    return ScannerEmptyReason.filteredOut;
   }
 
   ScannerState copyWith({
@@ -62,9 +148,13 @@ class ScannerState {
     bool? isRoomBoundaryMode,
     RoomSizePreset? roomSizePreset,
     bool? isBluetoothOff,
+    bool? isLocationOff,
     String? errorMessage,
     Map<String, String>? errorArgs,
     bool clearError = false,
+    String? noticeKey,
+    Map<String, String>? noticeArgs,
+    int? noticeId,
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
@@ -72,10 +162,15 @@ class ScannerState {
       isRoomBoundaryMode: isRoomBoundaryMode ?? this.isRoomBoundaryMode,
       roomSizePreset: roomSizePreset ?? this.roomSizePreset,
       isBluetoothOff: isBluetoothOff ?? this.isBluetoothOff,
+      isLocationOff: isLocationOff ?? this.isLocationOff,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       errorArgs: clearError
           ? const {}
           : (errorArgs ?? (errorMessage != null ? const {} : this.errorArgs)),
+      noticeKey: noticeKey ?? this.noticeKey,
+      noticeArgs:
+          noticeArgs ?? (noticeKey != null ? const {} : this.noticeArgs),
+      noticeId: noticeId ?? this.noticeId,
     );
   }
 }
@@ -96,6 +191,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
 
   StreamSubscription<ScannedDeviceModel>? _sightingsSub;
   StreamSubscription<bool>? _adapterSub;
+  StreamSubscription<BleScanError?>? _problemSub;
   Timer? _evictTimer;
   Future<void>? _starting;
 
@@ -107,8 +203,42 @@ class ScannerViewModel extends Notifier<ScannerState> {
     ref.onDispose(_stop);
 
     _adapterSub = _repository.bluetoothOn().listen(_onBluetoothOn);
+    _problemSub = _repository.scanProblem().listen(
+      _onScanProblem,
+      onError: (Object e, StackTrace st) =>
+          _logger.warning('BLE scan problem stream failed', e, st),
+    );
     Future.microtask(() => toggleScanning(true));
-    return const ScannerState();
+    return ScannerState();
+  }
+
+  /// Location off: Android silently returns no BLE results. The scan owner
+  /// stays registered so the shared scan resumes once Location is back.
+  void _onScanProblem(BleScanError? problem) {
+    if (!ref.mounted) return;
+    final isOff = problem == BleScanError.locationOff;
+    if (isOff == state.isLocationOff) return;
+    state = state.copyWith(isLocationOff: isOff);
+  }
+
+  /// Opens the system Location settings so the user can turn Location on.
+  Future<void> openLocationSettings() async {
+    try {
+      final opened = await _repository.openLocationSettings();
+      if (!opened && ref.mounted) _notify('scan_notice_location_settings');
+    } catch (e, st) {
+      _logger.warning('Opening Location settings failed', e, st);
+      if (ref.mounted) _notify('scan_notice_location_settings');
+    }
+  }
+
+  /// Shows a one-off message without touching the blocking scan error.
+  void _notify(String key, [Map<String, String> args = const {}]) {
+    state = state.copyWith(
+      noticeKey: key,
+      noticeArgs: args,
+      noticeId: state.noticeId + 1,
+    );
   }
 
   void _onBluetoothOn(bool isOn) {
@@ -170,6 +300,16 @@ class ScannerViewModel extends Notifier<ScannerState> {
       await _repository.startScan();
     } on BleScanException catch (e) {
       if (!ref.mounted) return;
+      if (e.code == BleScanError.locationOff) {
+        // Not a failure: the owner stays registered and the scan resumes
+        // by itself once Location is turned on.
+        state = state.copyWith(
+          isScanning: true,
+          isLocationOff: true,
+          clearError: true,
+        );
+        return;
+      }
       _stop(keepAdapterListener: true);
       state = state.copyWith(isScanning: false);
       _setScanError(e);
@@ -181,12 +321,13 @@ class ScannerViewModel extends Notifier<ScannerState> {
   }
 
   /// Maps a scan failure to a translatable message. Known core messages get
-  /// their own key; anything else is shown as reported.
+  /// their own key; anything else is shown as reported. Location off is
+  /// not an error: it is shown through [ScannerState.isLocationOff].
   void _setScanError(Object e) {
     final text = e is BleScanException ? e.message : '$e';
     final code = e is BleScanException ? e.code : BleScanError.other;
     if (code == BleScanError.locationOff) {
-      state = state.copyWith(errorMessage: 'scan_err_location');
+      state = state.copyWith(isLocationOff: true);
     } else if (code == BleScanError.throttled) {
       state = state.copyWith(errorMessage: 'scan_err_throttled');
     } else {
@@ -229,10 +370,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
       _logger.warning('Connect failed for $deviceId', e, st);
       if (!ref.mounted) return;
       _replace(deviceId, (d) => d.copyWith(isConnecting: false));
-      state = state.copyWith(
-        errorMessage: 'scan_err_connect_failed',
-        errorArgs: {'name': target.displayName},
-      );
+      _notify('scan_err_connect_failed', {'name': target.displayName});
     }
   }
 
@@ -255,9 +393,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
       await toggleScanning(true);
     } catch (e, st) {
       _logger.warning('Turning Bluetooth on failed', e, st);
-      if (ref.mounted) {
-        state = state.copyWith(errorMessage: 'scan_err_enable_bluetooth');
-      }
+      if (ref.mounted) _notify('scan_err_enable_bluetooth');
     }
   }
 
@@ -394,6 +530,8 @@ class ScannerViewModel extends Notifier<ScannerState> {
     if (!keepAdapterListener) {
       _adapterSub?.cancel();
       _adapterSub = null;
+      _problemSub?.cancel();
+      _problemSub = null;
     }
   }
 }

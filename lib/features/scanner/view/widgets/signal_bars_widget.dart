@@ -19,7 +19,9 @@ class SignalBarsWidget extends StatelessWidget {
           height: height,
           margin: EdgeInsets.only(right: 2.w),
           decoration: BoxDecoration(
-            color: isActive ? color : Colors.grey.shade300,
+            color: isActive
+                ? color
+                : Theme.of(context).colorScheme.outlineVariant,
             borderRadius: BorderRadius.circular(2.r),
           ),
         );
@@ -27,5 +29,3 @@ class SignalBarsWidget extends StatelessWidget {
     );
   }
 }
-
-/// Shimmer Skeleton Loading Card

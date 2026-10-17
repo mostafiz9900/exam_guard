@@ -20,12 +20,15 @@ class DetailRow extends StatelessWidget {
       padding: EdgeInsets.symmetric(vertical: 4.h),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(color: Colors.grey),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
+          SizedBox(width: 12.w),
           Flexible(
             child: Text(
               value,
@@ -41,5 +44,3 @@ class DetailRow extends StatelessWidget {
     );
   }
 }
-
-/// Interactive Multi-Target Radar Chart Widget with Gesture Detector

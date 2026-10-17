@@ -75,3 +75,17 @@
 - **What Happens**: Room "12/B" crashed PDF export.
 - **How to Avoid**: Always pass names through `safeFileName()` (core/services/share).
 - **Discovered**: 2026-10-17
+
+#### Android BLE — Location OFF = zero scan results (Android 12+ too)
+- **What Happens**: Scanner showed "LIVE • 0 DEVICES" forever on a Samsung A07 (Android 16) with Location off; enabling Location later didn't help until the scan restarted.
+- **Why**: Without `neverForLocation`, Android only delivers BLE results while Location is on. FBP only checks this on Android ≤ 11.
+- **How to Avoid**: `BluetoothServiceImpl` polls the Location service every 2 s while scanning, publishes `scanProblem` (`BleScanError.locationOff`), stops the radio, and restarts it automatically when Location returns. Screens show "Turn on Location" (native `exam_guard/system` → `openLocationSettings`).
+- **Discovered**: 2026-10-17 (on-device test)
+
+#### Devices without a magnetometer exist (Galaxy A07)
+- **How to Avoid**: `MagneticState.isSensorUnavailable` → explicit "no magnetometer" UI; dashboard shows "No sensor". Never show "—" without a reason.
+- **Discovered**: 2026-10-17
+
+#### Scanner state — blocking errors vs one-off notices
+- **How to Avoid**: `errorMessage` = blocking scan problem (drives dashboard "SCAN FAILED"); `noticeKey`/`noticeId` = snackbar-only (connect failed etc.).
+- **Discovered**: 2026-10-17

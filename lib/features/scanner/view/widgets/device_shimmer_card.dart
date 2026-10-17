@@ -3,29 +3,34 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/widgets/app_shimmer.dart';
 import 'package:flutter/material.dart';
 
+/// Placeholder card shown while waiting for the first advertisement.
 class DeviceShimmerCard extends StatelessWidget {
   const DeviceShimmerCard({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // The shimmer paints its own gradient over these shapes; any opaque
+    // color works as the mask.
+    const mask = Colors.white;
     return AppShimmer(
-      baseColor: Colors.grey.shade300,
-      highlightColor: Colors.grey.shade100,
+      baseColor: scheme.surfaceContainerHighest,
+      highlightColor: scheme.surfaceContainerLow,
       child: Container(
-        height: 80.h,
+        height: 72.h,
         padding: EdgeInsets.all(10.w),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: mask,
           borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
         ),
         child: Row(
           children: [
             Container(
-              width: 40.w,
-              height: 40.w,
+              width: 36.w,
+              height: 36.w,
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white,
+                color: mask,
               ),
             ),
             SizedBox(width: 10.w),
@@ -34,9 +39,9 @@ class DeviceShimmerCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(width: 130.w, height: 12.h, color: Colors.white),
+                  Container(width: 130.w, height: 12.h, color: mask),
                   SizedBox(height: 6.h),
-                  Container(width: 80.w, height: 9.h, color: Colors.white),
+                  Container(width: 80.w, height: 9.h, color: mask),
                 ],
               ),
             ),
@@ -44,7 +49,7 @@ class DeviceShimmerCard extends StatelessWidget {
               width: 50.w,
               height: 20.h,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: mask,
                 borderRadius: BorderRadius.circular(10.r),
               ),
             ),
@@ -54,5 +59,3 @@ class DeviceShimmerCard extends StatelessWidget {
     );
   }
 }
-
-/// Tactical Sweep Rotating Radar Painter

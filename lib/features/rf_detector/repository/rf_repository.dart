@@ -53,6 +53,14 @@ class RfRepository {
 
   Future<void> stopScan() => _bluetooth.stopScan(_scanOwner);
 
+  /// What currently stops the scan from receiving anything (e.g. Location
+  /// off), or null when it works. Current value first, then every change.
+  /// The scan resumes by itself once the problem clears.
+  Stream<BleScanError?> scanProblem() => _bluetooth.scanProblem;
+
+  /// Opens the system Location settings.
+  Future<bool> openLocationSettings() => _permissions.openLocationSettings();
+
   /// Scan failures arrive as [BleScanException] errors.
   Stream<RfPacket> packets() => _bluetooth.scanRecords.map(
     (r) => RfPacket(

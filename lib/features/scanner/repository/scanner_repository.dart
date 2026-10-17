@@ -45,6 +45,14 @@ class ScannerRepository {
   Future<AppPermissionStatus> requestPermissions() =>
       _permissions.requestBluetoothScan();
 
+  /// What currently stops the scan from finding devices (e.g. Location is
+  /// off), or null. Emits the current value first, then every change. The
+  /// shared scan resumes by itself once the problem clears.
+  Stream<BleScanError?> scanProblem() => _bluetooth.scanProblem;
+
+  /// Opens the system Location settings. False where that isn't possible.
+  Future<bool> openLocationSettings() => _permissions.openLocationSettings();
+
   /// Throws [BleScanException] when scanning cannot start.
   Future<void> startScan() => _bluetooth.startScan(_scanOwner);
 

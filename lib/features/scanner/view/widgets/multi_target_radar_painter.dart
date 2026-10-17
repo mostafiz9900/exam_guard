@@ -1,22 +1,54 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/scanner/view/widgets/professional_device_card.dart';
 import 'package:flutter/material.dart';
 
+/// Where a device's dot sits around the circle. BLE gives no direction, so
+/// the angle only spreads dots apart; it is derived from the device id so
+/// a dot stays put while the list changes (FNV-1a, stable across runs).
+double radarAngleFor(String id) {
+  var hash = 0x811c9dc5;
+  for (final unit in id.codeUnits) {
+    hash ^= unit;
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+  }
+  return (hash / 0x100000000) * 2 * math.pi;
+}
+
+/// Distance of a device's dot from the centre, as a fraction of the radius.
+/// Stronger signal = closer to the centre.
+double radarDistanceFor(int rssi) {
+  final ratio = ((rssi + 100).clamp(0, 70) / 70.0).clamp(0.1, 0.9);
+  return 1.0 - ratio;
+}
+
+/// Position of a device's dot in a chart of [size].
+Offset radarPositionFor(ScannedDeviceModel device, Size size) {
+  final center = Offset(size.width / 2, size.height / 2);
+  final distance =
+      math.min(size.width, size.height) / 2 * radarDistanceFor(device.rssi);
+  final angle = radarAngleFor(device.id);
+  return center + Offset(math.cos(angle), math.sin(angle)) * distance;
+}
+
 class MultiTargetRadarPainter extends CustomPainter {
-  MultiTargetRadarPainter({required this.sweepAngle, required this.devices});
+  MultiTargetRadarPainter({
+    required this.sweepAngle,
+    required this.devices,
+    required this.gridColor,
+    required this.labelColor,
+    required this.labelBackground,
+    required this.accent,
+  });
 
   final double sweepAngle;
   final List<ScannedDeviceModel> devices;
-
-  Color _getThreatColor(int rssi) {
-    if (rssi > -60) return const Color(0xFFEF4444); // Red Critical
-    if (rssi > -75) return const Color(0xFFF97316); // Orange High
-    if (rssi > -88) return const Color(0xFFF59E0B); // Yellow Medium
-    return const Color(0xFF10B981); // Green Low
-  }
+  final Color gridColor;
+  final Color labelColor;
+  final Color labelBackground;
+  final Color accent;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -24,12 +56,12 @@ class MultiTargetRadarPainter extends CustomPainter {
     final maxRadius = math.min(size.width, size.height) / 2;
 
     final ringPaint = Paint()
-      ..color = Colors.teal.withValues(alpha: 0.3)
+      ..color = gridColor.withValues(alpha: 0.6)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
 
     final gridPaint = Paint()
-      ..color = Colors.teal.withValues(alpha: 0.15)
+      ..color = gridColor.withValues(alpha: 0.3)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
@@ -50,7 +82,7 @@ class MultiTargetRadarPainter extends CustomPainter {
         text: TextSpan(
           text: distanceLabels[i],
           style: TextStyle(
-            color: Colors.teal.shade700,
+            color: labelColor,
             fontSize: 9,
             fontWeight: FontWeight.bold,
           ),
@@ -79,10 +111,7 @@ class MultiTargetRadarPainter extends CustomPainter {
         center: Alignment.center,
         startAngle: 0.0,
         endAngle: math.pi / 2,
-        colors: [
-          AppColors.primary.withValues(alpha: 0.35),
-          AppColors.primary.withValues(alpha: 0.0),
-        ],
+        colors: [accent.withValues(alpha: 0.35), accent.withValues(alpha: 0.0)],
       ).createShader(Rect.fromCircle(center: center, radius: maxRadius));
 
     canvas.save();
@@ -98,25 +127,14 @@ class MultiTargetRadarPainter extends CustomPainter {
     canvas.restore();
 
     // Center Inspector Phone Icon Dot
-    canvas.drawCircle(center, 5, Paint()..color = AppColors.primary);
+    canvas.drawCircle(center, 5, Paint()..color = accent);
 
     // Plot ALL discovered devices as interactive target dots on radar map
-    for (int i = 0; i < devices.length; i++) {
-      final device = devices[i];
-      final color = _getThreatColor(device.rssi);
-
-      final blipRatio = ((device.rssi + 100).clamp(0, 70) / 70.0).clamp(
-        0.1,
-        0.9,
-      );
-      final blipDistance = maxRadius * (1.0 - blipRatio);
-
-      // Distribute device dots evenly around 360° radar plane
-      final blipAngle =
-          -math.pi / 2 + (i * 2 * math.pi / math.max(1, devices.length));
-      final blipX = center.dx + blipDistance * math.cos(blipAngle);
-      final blipY = center.dy + blipDistance * math.sin(blipAngle);
-      final blipPos = Offset(blipX, blipY);
+    for (final device in devices) {
+      final color = signalColorFor(device.rssi);
+      final blipPos = radarPositionFor(device, size);
+      final blipX = blipPos.dx;
+      final blipY = blipPos.dy;
 
       // Draw connecting line to center
       canvas.drawLine(
@@ -156,7 +174,7 @@ class MultiTargetRadarPainter extends CustomPainter {
             color: color,
             fontSize: 7.5,
             fontWeight: FontWeight.w600,
-            backgroundColor: Colors.white.withValues(alpha: 0.9),
+            backgroundColor: labelBackground.withValues(alpha: 0.9),
           ),
         ),
         textDirection: ui.TextDirection.ltr,
@@ -169,8 +187,8 @@ class MultiTargetRadarPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant MultiTargetRadarPainter oldDelegate) {
     return oldDelegate.sweepAngle != sweepAngle ||
-        oldDelegate.devices != devices;
+        oldDelegate.devices != devices ||
+        oldDelegate.gridColor != gridColor ||
+        oldDelegate.labelBackground != labelBackground;
   }
 }
-
-/// Ultra-Professional Device List Card with Signal Bars, Vendor Badge & Quick Actions

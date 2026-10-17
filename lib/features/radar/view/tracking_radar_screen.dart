@@ -104,13 +104,18 @@ class TrackingRadarScreen extends HookConsumerWidget {
     final trendColor = isLive ? _getTrendColor(radarState.trend) : neutralColor;
     final trendIcon = isLive
         ? _getTrendIcon(radarState.trend)
-        : (radarState.errorKey != null
+        : (radarState.isLocationOff
+              ? Icons.location_off_rounded
+              : radarState.errorKey != null
               ? Icons.bluetooth_disabled_rounded
               : Icons.bluetooth_searching_rounded);
 
     final String trendTitle;
     final String trendText;
-    if (radarState.errorKey != null) {
+    if (radarState.isLocationOff) {
+      trendTitle = 'radar_location_off_title'.tr();
+      trendText = 'radar_location_off_text'.tr();
+    } else if (radarState.errorKey != null) {
       trendTitle = 'radar_scan_failed_title'.tr();
       trendText = radarState.errorKey!.tr();
     } else if (radarState.isSignalLost) {
@@ -129,6 +134,9 @@ class TrackingRadarScreen extends HookConsumerWidget {
     if (isLive) {
       threatTitle = radarState.threatLevel.labelKey.tr();
       threatText = radarState.threatLevel.descriptionKey.tr();
+    } else if (radarState.isLocationOff) {
+      threatTitle = 'radar_not_measuring'.tr();
+      threatText = 'radar_location_off_distance_text'.tr();
     } else if (radarState.errorKey != null) {
       threatTitle = 'radar_not_measuring'.tr();
       threatText = 'radar_not_measuring_text'.tr();
@@ -273,7 +281,17 @@ class TrackingRadarScreen extends HookConsumerWidget {
                                   ],
                                 ),
                               ),
-                              if (radarState.errorKey != null) ...[
+                              if (radarState.isLocationOff) ...[
+                                SizedBox(width: 8.w),
+                                FilledButton.tonalIcon(
+                                  onPressed: radarNotifier.openLocationSettings,
+                                  icon: Icon(
+                                    Icons.location_on_rounded,
+                                    size: 16.w,
+                                  ),
+                                  label: Text('radar_turn_on_location'.tr()),
+                                ),
+                              ] else if (radarState.errorKey != null) ...[
                                 SizedBox(width: 8.w),
                                 OutlinedButton(
                                   onPressed: radarNotifier.retry,

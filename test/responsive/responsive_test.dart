@@ -107,6 +107,11 @@ class FakeBluetooth implements IBluetoothService {
   @override
   Stream<BleScanRecord> get scanRecords => _records.stream;
 
+  final problems = StreamController<BleScanError?>.broadcast();
+
+  @override
+  Stream<BleScanError?> get scanProblem => problems.stream;
+
   @override
   Future<void> startScan(String owner) async {
     scheduleMicrotask(() {
@@ -158,6 +163,9 @@ class GrantedPermissions implements IPermissionService {
 
   @override
   Future<bool> openSettings() async => true;
+
+  @override
+  Future<bool> openLocationSettings() async => true;
 }
 
 class FakeMagnetometer implements IMagnetometerService {

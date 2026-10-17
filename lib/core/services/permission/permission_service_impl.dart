@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
@@ -28,4 +31,16 @@ class PermissionServiceImpl implements IPermissionService {
 
   @override
   Future<bool> openSettings() => openAppSettings();
+
+  static const MethodChannel _system = MethodChannel('exam_guard/system');
+
+  @override
+  Future<bool> openLocationSettings() async {
+    if (!Platform.isAndroid) return openAppSettings();
+    try {
+      return await _system.invokeMethod<bool>('openLocationSettings') ?? false;
+    } on PlatformException {
+      return openAppSettings();
+    }
+  }
 }

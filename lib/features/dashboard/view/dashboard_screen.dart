@@ -25,14 +25,24 @@ import 'package:exam_guard/features/dashboard/view/widgets/mini_sweep_painter.da
 import 'package:exam_guard/features/dashboard/view/widgets/signal_strength.dart';
 
 /// Scanner status as the dashboard shows it.
-enum _ScanStatus { live, bluetoothOff, failed, stopped }
+enum _ScanStatus { live, bluetoothOff, locationOff, failed, stopped }
 
+/// Only blocking problems count: [ScannerState.errorMessage] is a blocking
+/// scan problem, while transient notices ([ScannerState.noticeKey]) are not
+/// failures and never turn the chip into "SCAN FAILED".
 _ScanStatus _scanStatusOf(ScannerState s) {
   if (s.isBluetoothOff) return _ScanStatus.bluetoothOff;
+  if (s.isLocationOff) return _ScanStatus.locationOff;
   if (s.errorMessage != null) return _ScanStatus.failed;
   if (s.isScanning) return _ScanStatus.live;
   return _ScanStatus.stopped;
 }
+
+/// Amber warning that stays readable on light and dark surfaces.
+Color _warningColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? Colors.amber.shade300
+    : Colors.orange.shade800;
 
 /// Ordered magnetic levels: critical and above red, elevated orange.
 Color _magneticColor(MagneticHazardLevel level) {
@@ -51,8 +61,12 @@ class DashboardScreen extends HookConsumerWidget {
     // Only rarely-changing state is watched here; live readouts (clock,
     // devices, magnetic field) rebuild in their own small widgets below.
     final session = ref.watch(sessionViewModelProvider);
+    // "Scanning" with Location off receives nothing, so only a truly live
+    // scan animates the radar and shows the active scanner icon.
     final isScanning = ref.watch(
-      scannerViewModelProvider.select((s) => s.isScanning),
+      scannerViewModelProvider.select(
+        (s) => _scanStatusOf(s) == _ScanStatus.live,
+      ),
     );
 
     final room = session?.roomNumber.isNotEmpty == true
@@ -103,10 +117,10 @@ class DashboardScreen extends HookConsumerWidget {
               onPressed: () => Navigator.pop(context, false),
               child: Text('cancel'.tr()),
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.error,
+                foregroundColor: colors.onError,
               ),
               onPressed: () => Navigator.pop(context, true),
               child: Text('end_exam'.tr()),
@@ -171,6 +185,25 @@ class DashboardScreen extends HookConsumerWidget {
                     color: dialogColors.onSurfaceVariant,
                   ),
                 ),
+                SizedBox(height: 12.h),
+                Divider(height: 1, color: dialogColors.outlineVariant),
+                SizedBox(height: 4.h),
+                // Deliberately low-key: ending is irreversible and opens a
+                // second confirmation.
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: dialogColors.error,
+                      padding: EdgeInsets.symmetric(horizontal: 4.w),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () =>
+                        Navigator.pop(context, _ExitChoice.endExam),
+                    icon: Icon(Icons.stop_circle_outlined, size: 18.w),
+                    label: Text('dash_exit_end_exam'.tr()),
+                  ),
+                ),
               ],
             ),
             actions: [
@@ -178,17 +211,11 @@ class DashboardScreen extends HookConsumerWidget {
                 onPressed: () => Navigator.pop(context),
                 child: Text('cancel'.tr()),
               ),
-              TextButton(
+              FilledButton.icon(
+                autofocus: true,
                 onPressed: () => Navigator.pop(context, _ExitChoice.minimize),
-                child: Text('minimize'.tr()),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () => Navigator.pop(context, _ExitChoice.endExam),
-                child: Text('end_exam_and_report'.tr()),
+                icon: Icon(Icons.minimize_rounded, size: 18.w),
+                label: Text('minimize'.tr()),
               ),
             ],
           );
@@ -204,7 +231,8 @@ class DashboardScreen extends HookConsumerWidget {
           case _ExitChoice.minimize:
             SystemNavigator.pop();
           case _ExitChoice.endExam:
-            await finishExam();
+            // Second confirmation; one mis-tap must never end the exam.
+            await endExam();
           case null:
             break;
         }
@@ -243,8 +271,8 @@ class DashboardScreen extends HookConsumerWidget {
                 padding: EdgeInsetsDirectional.only(start: 4.w),
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: Colors.red.shade700,
-                    foregroundColor: Colors.white,
+                    backgroundColor: colors.error,
+                    foregroundColor: colors.onError,
                     padding: EdgeInsets.symmetric(horizontal: 10.w),
                     minimumSize: Size(0, 34.h),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -426,7 +454,7 @@ class DashboardScreen extends HookConsumerWidget {
                                             title: 'strong_signals'.tr(),
                                             value: '$strong',
                                             color: strong > 0
-                                                ? Colors.red
+                                                ? colors.error
                                                 : colors.onSurfaceVariant,
                                             onTap: () => context.pushTo(
                                               AppRoute.scanner,
@@ -468,7 +496,7 @@ class DashboardScreen extends HookConsumerWidget {
                               builder: (context, ref, _) {
                                 final count = ref.watch(
                                   scannerViewModelProvider.select(
-                                    (s) => s.activeDevices.length,
+                                    (s) => s.activeGroups.length,
                                   ),
                                 );
                                 return DashboardModuleCard(
@@ -495,21 +523,28 @@ class DashboardScreen extends HookConsumerWidget {
                               builder: (context, ref, _) {
                                 // Whole μT only, so this rebuilds far less
                                 // often than the ~10 Hz sensor stream.
-                                final reading = ref.watch(
+                                final (reading, unavailable) = ref.watch(
                                   magneticViewModelProvider.select(
-                                    (s) => s.hasReading
-                                        ? s.magnitude.round()
-                                        : null,
+                                    (s) => (
+                                      s.hasReading ? s.magnitude.round() : null,
+                                      s.isSensorUnavailable,
+                                    ),
                                   ),
                                 );
                                 return DashboardModuleCard(
-                                  icon: Icons.sensors_rounded,
+                                  icon: unavailable
+                                      ? Icons.sensors_off_rounded
+                                      : Icons.sensors_rounded,
                                   title: 'magnetic_scan'.tr(),
                                   subtitle: 'magnetic_scan_subtitle'.tr(),
-                                  badgeText: reading == null
+                                  badgeText: unavailable
+                                      ? 'dash_mag_not_available'.tr()
+                                      : reading == null
                                       ? '—'
                                       : '$reading μT',
-                                  color: Colors.indigo,
+                                  color: unavailable
+                                      ? colors.onSurfaceVariant
+                                      : Colors.indigo,
                                   onTap: () =>
                                       context.pushTo(AppRoute.magnetic),
                                 );
@@ -524,7 +559,7 @@ class DashboardScreen extends HookConsumerWidget {
                                   'count': '${session?.deviceLogs.length ?? 0}',
                                 },
                               ),
-                              color: Colors.blueGrey,
+                              color: colors.tertiary,
                               onTap: () => context.pushTo(AppRoute.report),
                             ),
                             DashboardModuleCard(
@@ -575,7 +610,7 @@ class DashboardScreen extends HookConsumerWidget {
                             ),
                           ],
                         ),
-                        SizedBox(height: 4.h),
+                        SizedBox(height: AppDimens.spacingSmall / 2),
                         const _LiveDeviceFeed(),
                       ],
                     ),
@@ -628,11 +663,16 @@ class _ScanStatusChip extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(scannerViewModelProvider.select(_scanStatusOf));
+    final error = Theme.of(context).colorScheme.error;
     final (label, color) = switch (status) {
       _ScanStatus.live => ('status_monitoring_live'.tr(), AppColors.success),
-      _ScanStatus.bluetoothOff => ('status_bluetooth_off'.tr(), Colors.red),
-      _ScanStatus.failed => ('status_scan_failed'.tr(), Colors.red),
-      _ScanStatus.stopped => ('status_scan_stopped'.tr(), Colors.red),
+      _ScanStatus.bluetoothOff => ('status_bluetooth_off'.tr(), error),
+      _ScanStatus.locationOff => (
+        'dash_status_location_off'.tr(),
+        _warningColor(context),
+      ),
+      _ScanStatus.failed => ('status_scan_failed'.tr(), error),
+      _ScanStatus.stopped => ('status_scan_stopped'.tr(), error),
     };
     final isLive = status == _ScanStatus.live;
 
@@ -665,17 +705,30 @@ class _ScanStatusChip extends ConsumerWidget {
           ),
           if (!isLive) ...[
             SizedBox(width: 2.w),
-            Icon(Icons.chevron_right_rounded, size: 12.w, color: color),
+            Icon(
+              status == _ScanStatus.locationOff
+                  ? Icons.location_on_rounded
+                  : Icons.chevron_right_rounded,
+              size: 12.w,
+              color: color,
+            ),
           ],
         ],
       ),
     );
 
     if (isLive) return chip;
-    return InkWell(
-      borderRadius: BorderRadius.circular(10.r),
-      onTap: () => context.pushTo(AppRoute.scanner),
-      child: chip,
+    return Tooltip(
+      message: status == _ScanStatus.locationOff
+          ? 'dash_turn_on_location'.tr()
+          : 'open_scanner'.tr(),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10.r),
+        onTap: status == _ScanStatus.locationOff
+            ? ref.read(scannerViewModelProvider.notifier).openLocationSettings
+            : () => context.pushTo(AppRoute.scanner),
+        child: chip,
+      ),
     );
   }
 }
@@ -686,11 +739,26 @@ class _MagneticStatBadge extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final (hasReading, tenths, level) = ref.watch(
+    final (hasReading, tenths, level, unavailable) = ref.watch(
       magneticViewModelProvider.select(
-        (s) => (s.hasReading, (s.magnitude * 10).round(), s.hazardLevel),
+        (s) => (
+          s.hasReading,
+          (s.magnitude * 10).round(),
+          s.hazardLevel,
+          s.isSensorUnavailable,
+        ),
       ),
     );
+    if (unavailable) {
+      // Missing hardware, not a reading: say so in a muted tone.
+      return LiveStatBadge(
+        icon: Icons.sensors_off_rounded,
+        title: 'magnetic_field'.tr(),
+        value: 'dash_mag_no_sensor'.tr(),
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        onTap: () => context.pushTo(AppRoute.magnetic),
+      );
+    }
     return LiveStatBadge(
       icon: Icons.sensors_rounded,
       title: 'magnetic_field'.tr(),
@@ -730,6 +798,7 @@ class _LiveDeviceFeed extends ConsumerWidget {
       );
     }
 
+    final warning = _warningColor(context);
     final (icon, message, isProblem) = switch (status) {
       _ScanStatus.live => (
         Icons.bluetooth_searching_rounded,
@@ -739,6 +808,11 @@ class _LiveDeviceFeed extends ConsumerWidget {
       _ScanStatus.bluetoothOff => (
         Icons.bluetooth_disabled_rounded,
         'feed_bluetooth_off'.tr(),
+        true,
+      ),
+      _ScanStatus.locationOff => (
+        Icons.location_off_rounded,
+        'dash_feed_location_off'.tr(),
         true,
       ),
       _ScanStatus.failed => (
@@ -753,6 +827,11 @@ class _LiveDeviceFeed extends ConsumerWidget {
       ),
     };
 
+    final isLocationOff = status == _ScanStatus.locationOff;
+    final iconColor = isLocationOff
+        ? warning
+        : (isProblem ? colors.error : colors.outline);
+
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(
@@ -763,20 +842,25 @@ class _LiveDeviceFeed extends ConsumerWidget {
         child: Center(
           child: Column(
             children: [
-              Icon(
-                icon,
-                size: 32.w,
-                color: isProblem ? colors.error : colors.outline,
-              ),
-              SizedBox(height: 8.h),
+              Icon(icon, size: 32.w, color: iconColor),
+              SizedBox(height: AppDimens.spacingSmall),
               Text(
                 message,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium
                     ?.copyWith(color: colors.onSurfaceVariant),
               ),
-              if (isProblem) ...[
-                SizedBox(height: 8.h),
+              if (isLocationOff) ...[
+                SizedBox(height: AppDimens.spacingSmall),
+                FilledButton.icon(
+                  onPressed: ref
+                      .read(scannerViewModelProvider.notifier)
+                      .openLocationSettings,
+                  icon: const Icon(Icons.location_on_rounded),
+                  label: Text('dash_turn_on_location'.tr()),
+                ),
+              ] else if (isProblem) ...[
+                SizedBox(height: AppDimens.spacingSmall),
                 OutlinedButton.icon(
                   onPressed: () => context.pushTo(AppRoute.scanner),
                   icon: const Icon(Icons.open_in_new_rounded),

@@ -29,6 +29,11 @@ class FakeBluetoothService implements IBluetoothService {
   @override
   Stream<BleScanRecord> get scanRecords => records.stream;
 
+  final problems = StreamController<BleScanError?>.broadcast();
+
+  @override
+  Stream<BleScanError?> get scanProblem => problems.stream;
+
   @override
   Future<void> startScan(String owner) async {
     if (startError != null) throw startError!;
@@ -56,6 +61,9 @@ class GrantedPermissions implements IPermissionService {
 
   @override
   Future<bool> openSettings() async => true;
+
+  @override
+  Future<bool> openLocationSettings() async => true;
 }
 
 void main() {
@@ -124,6 +132,40 @@ void main() {
     final state = container.read(rfDetectorViewModelProvider);
     expect(state.isMeasuring, isFalse);
     expect(state.errorKey, RfDetectorViewModel.scanFailedErrorKey);
+  });
+
+  test('Location off shows the location reason and clears by itself', () async {
+    await start();
+    bluetooth.problems.add(BleScanError.locationOff);
+    await pumpEventQueue();
+    var state = container.read(rfDetectorViewModelProvider);
+    expect(state.isMeasuring, isFalse);
+    expect(state.isLocationOff, isTrue);
+    expect(state.errorKey, RfDetectorViewModel.locationOffErrorKey);
+    expect(state.currentDbm, isNull);
+    // The scan stays registered so it resumes once Location is back.
+    expect(bluetooth.owners, contains('rf_detector'));
+
+    bluetooth.problems.add(null);
+    await pumpEventQueue();
+    state = container.read(rfDetectorViewModelProvider);
+    expect(state.isLocationOff, isFalse);
+    expect(state.errorKey, isNull);
+    expect(state.isMeasuring, isTrue);
+  });
+
+  test('a location scan error does not stop the scan', () async {
+    await start();
+    bluetooth.records.addError(
+      const BleScanException('Location off', code: BleScanError.locationOff),
+    );
+    await pumpEventQueue();
+    expect(container.read(rfDetectorViewModelProvider).isLocationOff, isTrue);
+    expect(bluetooth.owners, contains('rf_detector'));
+
+    bluetooth.problems.add(null);
+    await pumpEventQueue();
+    expect(container.read(rfDetectorViewModelProvider).isMeasuring, isTrue);
   });
 
   test('only "ExamGuard…" names are hardware nodes, never generic ESP32', () {

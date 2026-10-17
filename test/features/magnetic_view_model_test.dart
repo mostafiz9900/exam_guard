@@ -104,6 +104,51 @@ void main() {
       expect(state.isBaselineCalibrated, isTrue);
     });
 
+    test('no readings at all marks the sensor unavailable', () async {
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      final state = container.read(magneticViewModelProvider);
+      expect(state.isSensorUnavailable, isTrue);
+      expect(state.isWaitingForSensor, isFalse);
+      expect(state.isPaused, isFalse);
+      expect(state.isLive, isFalse);
+      expect(state.hasReading, isFalse);
+    });
+
+    test(
+      'a slow sensor still comes live after being marked unavailable',
+      () async {
+        await Future<void>.delayed(const Duration(milliseconds: 2100));
+        expect(
+          container.read(magneticViewModelProvider).isSensorUnavailable,
+          isTrue,
+        );
+        sensor.emit(45);
+        await pumpEventQueue();
+        final state = container.read(magneticViewModelProvider);
+        expect(state.isSensorUnavailable, isFalse);
+        expect(state.isLive, isTrue);
+      },
+    );
+
+    test('a sensor stream error marks the sensor unavailable', () async {
+      sensor.controller.addError(Exception('NO_SENSOR'));
+      await pumpEventQueue();
+      expect(
+        container.read(magneticViewModelProvider).isSensorUnavailable,
+        isTrue,
+      );
+    });
+
+    test('waiting and paused are not "unavailable"', () async {
+      var state = container.read(magneticViewModelProvider);
+      expect(state.isWaitingForSensor, isTrue);
+      expect(state.isSensorUnavailable, isFalse);
+      container.read(magneticViewModelProvider.notifier).stopScanning();
+      state = container.read(magneticViewModelProvider);
+      expect(state.isPaused, isTrue);
+      expect(state.isSensorUnavailable, isFalse);
+    });
+
     test('a short spike between UI publishes still sets the peak', () async {
       sensor.emit(45); // first reading → baseline, published immediately
       await pumpEventQueue();

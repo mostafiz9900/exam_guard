@@ -31,6 +31,10 @@ class RfDetectorState {
   /// The Bluetooth adapter is off; the user must turn it on.
   final bool isBluetoothOff;
 
+  /// Location (GPS) is off, so Android delivers no Bluetooth results.
+  /// Measuring resumes by itself once Location is back on.
+  final bool isLocationOff;
+
   const RfDetectorState({
     this.currentDbm,
     this.peakDbm,
@@ -45,6 +49,7 @@ class RfDetectorState {
     this.errorKey,
     this.isStarting = false,
     this.isBluetoothOff = false,
+    this.isLocationOff = false,
   });
 
   bool get isHardwareNodeNearby => hardwareNodeName != null;
@@ -67,6 +72,7 @@ class RfDetectorState {
     String? Function()? errorKey,
     bool? isStarting,
     bool? isBluetoothOff,
+    bool? isLocationOff,
   }) {
     return RfDetectorState(
       currentDbm: currentDbm != null ? currentDbm() : this.currentDbm,
@@ -86,6 +92,7 @@ class RfDetectorState {
       errorKey: errorKey != null ? errorKey() : this.errorKey,
       isStarting: isStarting ?? this.isStarting,
       isBluetoothOff: isBluetoothOff ?? this.isBluetoothOff,
+      isLocationOff: isLocationOff ?? this.isLocationOff,
     );
   }
 }
@@ -129,6 +136,7 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
   final Map<String, DateTime> _hardwareNodes = {};
   StreamSubscription<RfPacket>? _sub;
   StreamSubscription<BleAdapterStatus>? _adapterSub;
+  StreamSubscription<BleScanError?>? _problemSub;
   Timer? _ticker;
   bool _scanStarted = false;
 
@@ -152,6 +160,7 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
       isStarting: true,
       errorKey: () => null,
       isBluetoothOff: false,
+      isLocationOff: false,
     );
 
     final permission = await _repository.requestPermissions();
@@ -171,6 +180,10 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
       _onPacket,
       onError: (Object e, StackTrace st) {
         _logger.warning('RF scan error', e, st);
+        if (e is BleScanException && e.code == BleScanError.locationOff) {
+          _onLocationOff();
+          return;
+        }
         _notMeasuring(
           e is BleScanException ? scanErrorKey(e) : scanFailedErrorKey,
         );
@@ -183,25 +196,91 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
       await _repository.startScan();
     } on BleScanException catch (e) {
       _logger.warning('RF scan failed to start', e);
-      _notMeasuring(scanErrorKey(e));
-      return;
+      if (e.code != BleScanError.locationOff) {
+        _notMeasuring(scanErrorKey(e));
+        return;
+      }
+      // Keep the scan registered: it resumes once Location is back on.
+      _onLocationOff();
     } catch (e, st) {
       _logger.error('RF scan could not start', e, st);
       _notMeasuring(scanStartErrorKey);
       return;
     }
-    if (ref.mounted) {
+    if (!ref.mounted) return;
+    if (!state.isLocationOff) {
       state = state.copyWith(
         isScanning: true,
         isStarting: false,
         errorKey: () => null,
       );
     }
+    _watchScanProblem();
+  }
+
+  /// Opens the system Location settings so the user can turn Location on.
+  Future<void> openLocationSettings() => _repository.openLocationSettings();
+
+  /// Follows scan problems (Location off) while the scan is registered.
+  /// Re-subscribed on every start so the current problem is re-read.
+  void _watchScanProblem() {
+    _problemSub?.cancel();
+    _problemSub = _repository.scanProblem().listen(
+      (problem) {
+        if (!ref.mounted || !_scanStarted) return;
+        if (problem == BleScanError.locationOff) {
+          _onLocationOff();
+        } else if (state.isLocationOff) {
+          _onLocationBack();
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        _logger.warning('RF scan problem stream error', e, st);
+      },
+    );
+  }
+
+  /// Location went off: nothing is received, so stop showing readings. The
+  /// scan stays registered and the Bluetooth service resumes it by itself.
+  void _onLocationOff() {
+    if (!ref.mounted) return;
+    _recent.clear();
+    if (_isBeeping) {
+      _buzzer.stopBuzzer();
+      _isBeeping = false;
+    }
+    state = state.copyWith(
+      isScanning: true,
+      isStarting: false,
+      isLocationOff: true,
+      errorKey: () => locationOffErrorKey,
+      currentDbm: () => null,
+      packetsPerSecond: 0,
+      activeTransmitters: 0,
+      strongestSourceName: () => null,
+      hardwareNodeName: () => null,
+      threatLevel: RfThreatLevel.quiet,
+    );
+  }
+
+  /// Location is back on and the scan resumed: measure again.
+  void _onLocationBack() {
+    if (!ref.mounted) return;
+    _recent.clear();
+    state = state.copyWith(
+      isScanning: _scanStarted,
+      isLocationOff: false,
+      errorKey: () => null,
+    );
   }
 
   void stopScanning() {
     _stop();
-    state = state.copyWith(isScanning: false);
+    state = state.copyWith(
+      isScanning: false,
+      isLocationOff: false,
+      errorKey: state.isLocationOff ? () => null : null,
+    );
   }
 
   /// Follows the adapter so turning Bluetooth off mid-session is shown, and
@@ -243,11 +322,14 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
         _logger.warning('RF scan could not stop', e, st);
       });
     }
+    _problemSub?.cancel();
+    _problemSub = null;
     _buzzer.stopBuzzer();
     state = state.copyWith(
       isScanning: false,
       isStarting: false,
       isBluetoothOff: bluetoothOff,
+      isLocationOff: false,
       errorKey: () => errorKey,
       currentDbm: () => null,
       packetsPerSecond: 0,
@@ -264,7 +346,8 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
   }
 
   void _tick() {
-    if (!ref.mounted) return;
+    // Nothing arrives while Location is off; keep the "not measuring" state.
+    if (!ref.mounted || state.isLocationOff) return;
     final now = DateTime.now();
     _recent.removeWhere((r) => now.difference(r.timestamp) > _window);
     _hardwareNodes.removeWhere((_, seen) => now.difference(seen) > _window * 5);
@@ -362,6 +445,8 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
     _cancelLive();
     _adapterSub?.cancel();
     _adapterSub = null;
+    _problemSub?.cancel();
+    _problemSub = null;
     if (_scanStarted) {
       _scanStarted = false;
       _repository.stopScan().catchError((Object e, StackTrace st) {

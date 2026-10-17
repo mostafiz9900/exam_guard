@@ -359,8 +359,10 @@ class RfDetectorScreen extends ConsumerWidget {
                                             : 'rf_not_measuring'.tr(
                                                 args: {
                                                   'reason':
-                                                      (state.errorKey ??
-                                                              'rf_reason_stopped')
+                                                      (state.isLocationOff
+                                                              ? 'rf_reason_location_off'
+                                                              : state.errorKey ??
+                                                                    'rf_reason_stopped')
                                                           .tr(),
                                                 },
                                               )),
@@ -375,7 +377,9 @@ class RfDetectorScreen extends ConsumerWidget {
                                 Text(
                                   (isMeasuring
                                           ? state.threatLevel.suggestionKey
-                                          : (state.isBluetoothOff
+                                          : (state.isLocationOff
+                                                ? 'rf_location_off_hint'
+                                                : state.isBluetoothOff
                                                 ? 'rf_bluetooth_off_hint'
                                                 : 'rf_not_measuring_hint'))
                                       .tr(),
@@ -385,7 +389,15 @@ class RfDetectorScreen extends ConsumerWidget {
                                   ),
                                   textAlign: TextAlign.center,
                                 ),
-                                if (!isMeasuring && !state.isStarting) ...[
+                                if (state.isLocationOff) ...[
+                                  SizedBox(height: 8.h),
+                                  FilledButton.tonalIcon(
+                                    onPressed: notifier.openLocationSettings,
+                                    icon: const Icon(Icons.location_on_rounded),
+                                    label: Text('rf_turn_on_location'.tr()),
+                                  ),
+                                ] else if (!isMeasuring &&
+                                    !state.isStarting) ...[
                                   SizedBox(height: 8.h),
                                   OutlinedButton.icon(
                                     onPressed: notifier.startScanning,

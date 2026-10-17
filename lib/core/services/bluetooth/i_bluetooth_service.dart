@@ -80,6 +80,11 @@ abstract interface class IBluetoothService {
   /// Scan failures arrive as [BleScanException] errors.
   Stream<BleScanRecord> get scanRecords;
 
+  /// Something that currently stops scans from returning results, or null
+  /// when scanning works. Emits the current value first, then every change.
+  /// While a problem is reported the scan resumes by itself once it clears.
+  Stream<BleScanError?> get scanProblem;
+
   /// Throws [BleScanException] when the radio cannot start scanning.
   Future<void> startScan(String owner);
 

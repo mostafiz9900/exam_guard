@@ -51,6 +51,7 @@ class MagneticScannerScreen extends HookConsumerWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final secondaryText = colorScheme.onSurfaceVariant;
     final isLive = state.isLive;
+    final isUnavailable = state.isSensorUnavailable;
     final isStopped = !state.isScanning || state.errorKey != null;
     final hazardColor = isLive
         ? _getHazardColor(state.hazardLevel)
@@ -60,7 +61,10 @@ class MagneticScannerScreen extends HookConsumerWidget {
     final Color statusColor;
     if (state.errorKey != null) {
       statusText = 'mag_status_unavailable'.tr();
-      statusColor = colorScheme.error;
+      // Missing hardware, not an alarm: keep it calm and muted.
+      statusColor = isUnavailable
+          ? colorScheme.onSurfaceVariant
+          : colorScheme.error;
     } else if (!state.isScanning) {
       statusText = 'mag_status_paused'.tr();
       statusColor = colorScheme.outline;
@@ -138,32 +142,34 @@ class MagneticScannerScreen extends HookConsumerWidget {
               tooltip: 'mag_how_to_use'.tr(),
               onPressed: () => _showHowToUseModal(context),
             ),
-            IconButton(
-              icon: Icon(
-                state.isBuzzerEnabled
-                    ? Icons.notifications_active_rounded
-                    : Icons.notifications_off_rounded,
-                size: 24.w,
+            if (!isUnavailable) ...[
+              IconButton(
+                icon: Icon(
+                  state.isBuzzerEnabled
+                      ? Icons.notifications_active_rounded
+                      : Icons.notifications_off_rounded,
+                  size: 24.w,
+                ),
+                tooltip: 'mag_audio_tooltip'.tr(),
+                onPressed: () => notifier.toggleBuzzer(),
               ),
-              tooltip: 'mag_audio_tooltip'.tr(),
-              onPressed: () => notifier.toggleBuzzer(),
-            ),
-            IconButton(
-              icon: Icon(
-                state.isScanning
-                    ? Icons.stop_circle_outlined
-                    : Icons.play_arrow_rounded,
-                size: 28.w,
+              IconButton(
+                icon: Icon(
+                  state.isScanning
+                      ? Icons.stop_circle_outlined
+                      : Icons.play_arrow_rounded,
+                  size: 28.w,
+                ),
+                tooltip: (state.isScanning ? 'mag_pause' : 'mag_resume').tr(),
+                onPressed: () {
+                  if (state.isScanning) {
+                    notifier.stopScanning();
+                  } else {
+                    notifier.startScanning();
+                  }
+                },
               ),
-              tooltip: (state.isScanning ? 'mag_pause' : 'mag_resume').tr(),
-              onPressed: () {
-                if (state.isScanning) {
-                  notifier.stopScanning();
-                } else {
-                  notifier.startScanning();
-                }
-              },
-            ),
+            ],
             const AppSettingsMenu(),
           ],
         ),
@@ -242,286 +248,300 @@ class MagneticScannerScreen extends HookConsumerWidget {
                     ),
                     SizedBox(height: 8.h),
 
-                    // Hazard Status Banner
-                    Container(
-                      padding: EdgeInsets.all(AppDimens.spacingMedium),
-                      decoration: BoxDecoration(
-                        color: hazardColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(
-                          AppDimens.radiusMedium,
-                        ),
-                        border: Border.all(
-                          color: hazardColor.withValues(alpha: 0.4),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            !isLive
-                                ? Icons.sensors_off_rounded
-                                : (state.hazardLevel ==
-                                          MagneticHazardLevel.normal
-                                      ? Icons.verified_user_rounded
-                                      : Icons.warning_amber_rounded),
-                            color: hazardColor,
-                            size: 28.w,
+                    if (isUnavailable)
+                      _NoSensorCard(
+                        onOpenScanner: () => context.pushTo(AppRoute.scanner),
+                      )
+                    else ...[
+                      // Hazard Status Banner
+                      Container(
+                        padding: EdgeInsets.all(AppDimens.spacingMedium),
+                        decoration: BoxDecoration(
+                          color: hazardColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(
+                            AppDimens.radiusMedium,
                           ),
-                          SizedBox(width: 12.w),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  bannerTitle,
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(
-                                        color: hazardColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                ),
-                                SizedBox(height: 2.h),
-                                Text(
-                                  bannerText,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: secondaryText),
-                                ),
-                              ],
-                            ),
+                          border: Border.all(
+                            color: hazardColor.withValues(alpha: 0.4),
+                            width: 1.5,
                           ),
-                          if (isStopped) ...[
-                            SizedBox(width: 8.w),
-                            OutlinedButton(
-                              onPressed: notifier.startScanning,
-                              child: Text('mag_retry'.tr()),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: AppDimens.spacingLarge),
-
-                    // Main Interactive Compass Radial Gauge
-                    Card(
-                      elevation: 3,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppDimens.radiusLarge,
                         ),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(AppDimens.spacingLarge),
-                        child: Column(
+                        child: Row(
                           children: [
-                            Text(
-                              'mag_gauge_title'.tr(),
-                              style: Theme.of(context).textTheme.labelMedium
-                                  ?.copyWith(
-                                    letterSpacing: 1.2,
-                                    color: secondaryText,
-                                  ),
+                            Icon(
+                              !isLive
+                                  ? Icons.sensors_off_rounded
+                                  : (state.hazardLevel ==
+                                            MagneticHazardLevel.normal
+                                        ? Icons.verified_user_rounded
+                                        : Icons.warning_amber_rounded),
+                              color: hazardColor,
+                              size: 28.w,
                             ),
-                            SizedBox(height: 16.h),
-
-                            // Radial Gauge Custom Painter
-                            CustomPaint(
-                              size: Size(180.w, 180.w),
-                              painter: MagneticGaugePainter(
-                                magnitude: state.magnitude,
-                                angle: needleAngle,
-                                color: hazardColor,
-                                trackColor: colorScheme.surfaceContainerHighest,
-                              ),
-                              child: SizedBox(
-                                width: 180.w,
-                                height: 180.w,
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '${state.magnitude}',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .displaySmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                              color: hazardColor,
-                                            ),
-                                      ),
-                                      Text(
-                                        'mag_unit'.tr(),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall
-                                            ?.copyWith(
-                                              fontSize: 10.sp,
-                                              color: secondaryText,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(height: 20.h),
-
-                            // Live Signal History Sparkline Wave
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'mag_fluctuations'.tr(),
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(color: secondaryText),
-                                ),
-                                SizedBox(height: 6.h),
-                                SizedBox(
-                                  height: 36.h,
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: state.history.map((val) {
-                                      final normalized = (val / 160.0).clamp(
-                                        0.1,
-                                        1.0,
-                                      );
-                                      return Container(
-                                        width: 14.w,
-                                        height: 36.h * normalized,
-                                        decoration: BoxDecoration(
-                                          color: isLive
-                                              ? _getHazardColor(
-                                                  MagneticState.calculateHazard(
-                                                    val,
-                                                    state.baseline,
-                                                    state.sensitivity,
-                                                  ),
-                                                )
-                                              : colorScheme.outline,
-                                          borderRadius: BorderRadius.circular(
-                                            4.r,
-                                          ),
+                            SizedBox(width: 12.w),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    bannerTitle,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: hazardColor,
+                                          fontWeight: FontWeight.bold,
                                         ),
-                                      );
-                                    }).toList(),
                                   ),
-                                ),
-                              ],
+                                  SizedBox(height: 2.h),
+                                  Text(
+                                    bannerText,
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(color: secondaryText),
+                                  ),
+                                ],
+                              ),
                             ),
-                            SizedBox(height: 16.h),
-
-                            // Baseline & Peak Stats Row
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                StatItem(
-                                  label:
-                                      (state.isBaselineCalibrated
-                                              ? 'mag_baseline'
-                                              : 'mag_baseline_auto')
-                                          .tr(),
-                                  value: '${state.baseline} μT',
-                                ),
-                                StatItem(
-                                  label: 'mag_peak_hold'.tr(),
-                                  value: '${state.peakValue} μT',
-                                  valueColor: AppColors.error,
-                                ),
-                                StatItem(
-                                  label: 'mag_vector'.tr(),
-                                  value:
-                                      '${state.x.toInt()}/${state.y.toInt()}/${state.z.toInt()}',
-                                ),
-                              ],
-                            ),
-                            if (isLive && !state.isBaselineCalibrated) ...[
-                              SizedBox(height: 8.h),
-                              Text(
-                                'mag_baseline_auto_hint'.tr(
-                                  args: {'button': 'mag_calibrate'.tr()},
-                                ),
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: secondaryText),
+                            if (state.isPaused) ...[
+                              SizedBox(width: 8.w),
+                              OutlinedButton(
+                                onPressed: notifier.startScanning,
+                                child: Text('mag_resume'.tr()),
                               ),
                             ],
                           ],
                         ),
                       ),
-                    ),
-                    SizedBox(height: AppDimens.spacingLarge),
+                      SizedBox(height: AppDimens.spacingLarge),
 
-                    // Sensitivity Presets Selector
-                    Text(
-                      'mag_sensitivity_title'.tr(),
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 6.h),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: MagneticSensitivity.values.map((sens) {
-                          final isSelected = state.sensitivity == sens;
-                          return Padding(
-                            padding: EdgeInsetsDirectional.only(end: 8.w),
-                            child: ChoiceChip(
-                              label: Text(
-                                'mag_sensitivity_chip'.tr(
-                                  args: {
-                                    'label': sens.labelKey.tr(),
-                                    'value': _threshold(sens),
-                                  },
+                      // Main Interactive Compass Radial Gauge
+                      Card(
+                        elevation: 3,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppDimens.radiusLarge,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(AppDimens.spacingLarge),
+                          child: Column(
+                            children: [
+                              Text(
+                                'mag_gauge_title'.tr(),
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      letterSpacing: 1.2,
+                                      color: secondaryText,
+                                    ),
+                              ),
+                              SizedBox(height: 16.h),
+
+                              // Radial Gauge Custom Painter
+                              CustomPaint(
+                                size: Size(180.w, 180.w),
+                                painter: MagneticGaugePainter(
+                                  magnitude: state.magnitude,
+                                  angle: needleAngle,
+                                  color: hazardColor,
+                                  trackColor:
+                                      colorScheme.surfaceContainerHighest,
+                                ),
+                                child: SizedBox(
+                                  width: 180.w,
+                                  height: 180.w,
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '${state.magnitude}',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .displaySmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: hazardColor,
+                                              ),
+                                        ),
+                                        Text(
+                                          'mag_unit'.tr(),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelSmall
+                                              ?.copyWith(
+                                                fontSize: 10.sp,
+                                                color: secondaryText,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
-                              selected: isSelected,
-                              selectedColor: Theme.of(context)
-                                  .colorScheme
-                                  .primary
-                                  .withValues(alpha: 0.2),
-                              onSelected: (_) => notifier.setSensitivity(sens),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    SizedBox(height: 4.h),
-                    Text(
-                      'mag_sensitivity_hint'.tr(),
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: secondaryText),
-                    ),
-                    SizedBox(height: AppDimens.spacingLarge),
+                              SizedBox(height: 20.h),
 
-                    // Action Buttons Row (Calibrate)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: isLive ? calibrate : null,
-                            icon: const Icon(Icons.tune_rounded),
-                            label: Text('mag_calibrate'.tr()),
-                            style: OutlinedButton.styleFrom(
-                              padding: EdgeInsets.symmetric(vertical: 12.h),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(
-                                  AppDimens.radiusMedium,
+                              // Live Signal History Sparkline Wave
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'mag_fluctuations'.tr(),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(color: secondaryText),
+                                  ),
+                                  SizedBox(height: 6.h),
+                                  SizedBox(
+                                    height: 36.h,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: state.history.map((val) {
+                                        final normalized = (val / 160.0).clamp(
+                                          0.1,
+                                          1.0,
+                                        );
+                                        return Container(
+                                          width: 14.w,
+                                          height: 36.h * normalized,
+                                          decoration: BoxDecoration(
+                                            color: isLive
+                                                ? _getHazardColor(
+                                                    MagneticState.calculateHazard(
+                                                      val,
+                                                      state.baseline,
+                                                      state.sensitivity,
+                                                    ),
+                                                  )
+                                                : colorScheme.outline,
+                                            borderRadius: BorderRadius.circular(
+                                              4.r,
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 16.h),
+
+                              // Baseline & Peak Stats Row
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceAround,
+                                children: [
+                                  StatItem(
+                                    label:
+                                        (state.isBaselineCalibrated
+                                                ? 'mag_baseline'
+                                                : 'mag_baseline_auto')
+                                            .tr(),
+                                    value: '${state.baseline} μT',
+                                  ),
+                                  StatItem(
+                                    label: 'mag_peak_hold'.tr(),
+                                    value: '${state.peakValue} μT',
+                                    valueColor: AppColors.error,
+                                  ),
+                                  StatItem(
+                                    label: 'mag_vector'.tr(),
+                                    value:
+                                        '${state.x.toInt()}/${state.y.toInt()}/${state.z.toInt()}',
+                                  ),
+                                ],
+                              ),
+                              if (isLive && !state.isBaselineCalibrated) ...[
+                                SizedBox(height: 8.h),
+                                Text(
+                                  'mag_baseline_auto_hint'.tr(
+                                    args: {'button': 'mag_calibrate'.tr()},
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: secondaryText),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: AppDimens.spacingLarge),
+
+                      // Sensitivity Presets Selector
+                      Text(
+                        'mag_sensitivity_title'.tr(),
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 6.h),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: MagneticSensitivity.values.map((sens) {
+                            final isSelected = state.sensitivity == sens;
+                            return Padding(
+                              padding: EdgeInsetsDirectional.only(end: 8.w),
+                              child: ChoiceChip(
+                                label: Text(
+                                  'mag_sensitivity_chip'.tr(
+                                    args: {
+                                      'label': sens.labelKey.tr(),
+                                      'value': _threshold(sens),
+                                    },
+                                  ),
+                                ),
+                                selected: isSelected,
+                                selectedColor: Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withValues(alpha: 0.2),
+                                onSelected: (_) =>
+                                    notifier.setSensitivity(sens),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      SizedBox(height: 4.h),
+                      Text(
+                        'mag_sensitivity_hint'.tr(),
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: secondaryText),
+                      ),
+                      SizedBox(height: AppDimens.spacingLarge),
+
+                      // Action Buttons Row (Calibrate)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: isLive ? calibrate : null,
+                              icon: const Icon(Icons.tune_rounded),
+                              label: Text('mag_calibrate'.tr()),
+                              style: OutlinedButton.styleFrom(
+                                padding: EdgeInsets.symmetric(vertical: 12.h),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                    AppDimens.radiusMedium,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: AppDimens.spacingMedium),
+                        ],
+                      ),
+                      SizedBox(height: AppDimens.spacingMedium),
 
-                    // Log Incident Action Button
-                    PrimaryButton(
-                      label: 'log_incident'.tr(),
-                      onPressed: logIncident,
-                    ),
+                      // Log Incident Action Button
+                      PrimaryButton(
+                        label: 'log_incident'.tr(),
+                        onPressed: logIncident,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -638,6 +658,71 @@ class MagneticScannerScreen extends HookConsumerWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// Shown instead of the gauge and controls when the phone has no
+/// magnetometer: nothing on this screen can work, so say so plainly.
+class _NoSensorCard extends StatelessWidget {
+  const _NoSensorCard({required this.onOpenScanner});
+
+  final VoidCallback onOpenScanner;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Card(
+      elevation: 0,
+      color: colors.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppDimens.radiusLarge),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(AppDimens.spacingLarge),
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.all(16.w),
+              decoration: BoxDecoration(
+                color: colors.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.sensors_off_rounded,
+                size: 40.w,
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+            SizedBox(height: AppDimens.spacingMedium),
+            Text(
+              'mag_no_sensor_title'.tr(),
+              textAlign: TextAlign.center,
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: colors.onSurface,
+              ),
+            ),
+            SizedBox(height: AppDimens.spacingSmall),
+            Text(
+              'mag_no_sensor_text'.tr(),
+              textAlign: TextAlign.center,
+              style: textTheme.bodyMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: AppDimens.spacingLarge),
+            OutlinedButton.icon(
+              onPressed: onOpenScanner,
+              icon: const Icon(Icons.cell_wifi_rounded),
+              label: Text('open_scanner'.tr()),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

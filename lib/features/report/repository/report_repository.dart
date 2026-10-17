@@ -1,4 +1,6 @@
-import 'dart:ui' show Rect;
+import 'dart:ui' show Color, Rect;
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -19,7 +21,7 @@ class ReportRepository {
     SessionModel session, {
     Rect? origin,
   }) async {
-    final bytes = await _pdf.buildTableDocument(_document(session));
+    final bytes = await _pdf.buildTableDocument(buildDocument(session));
     return _share.shareFile(
       bytes: bytes,
       fileName: reportFileName(session),
@@ -36,51 +38,123 @@ class ReportRepository {
 
   static String _orDash(String v) => v.trim().isEmpty ? '-' : v;
 
-  PdfTableDocument _document(SessionModel session) {
+  // Muted, print-friendly severity colors.
+  static const _critical = Color(0xFFB42318);
+  static const _high = Color(0xFFC4500C);
+  static const _medium = Color(0xFF9A6700);
+  static const _low = Color(0xFF3F6E8C);
+  static const _clear = Color(0xFF2E7D4F);
+
+  static Color severityColor(LogSeverity s) => switch (s) {
+    LogSeverity.critical => _critical,
+    LogSeverity.high => _high,
+    LogSeverity.medium => _medium,
+    LogSeverity.low => _low,
+  };
+
+  /// Short, human-readable report ID derived from the session id,
+  /// e.g. `EG-MGO3K2F4` for a millisecond timestamp id.
+  static String reportId(SessionModel session) {
+    final millis = int.tryParse(session.id);
+    final core = millis != null
+        ? millis.toRadixString(36).toUpperCase()
+        : session.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+    final short = core.length > 10 ? core.substring(core.length - 10) : core;
+    return 'EG-${short.isEmpty ? '0' : short}';
+  }
+
+  /// e.g. "No violations recorded", "3 violations recorded — 1 critical".
+  static String verdict(List<ActionLogModel> logs) {
+    if (logs.isEmpty) return 'No violations recorded';
+    final critical = logs.where((l) => l.severity == LogSeverity.critical);
+    final noun = logs.length == 1 ? 'violation' : 'violations';
+    return '${logs.length} $noun recorded — ${critical.length} critical';
+  }
+
+  /// Builds the report content. [generatedAt] defaults to now.
+  @visibleForTesting
+  static PdfTableDocument buildDocument(
+    SessionModel session, {
+    DateTime? generatedAt,
+  }) {
     final logs = session.deviceLogs;
+    final generated = AppDateFormat.fullDateTime(generatedAt ?? DateTime.now());
     int count(LogSeverity s) => logs.where((l) => l.severity == s).length;
+    final criticalCount = count(LogSeverity.critical);
 
     return PdfTableDocument(
-      title: 'ExamGuard — Exam Security Session Report',
-      infoRows: {
-        'Institute': session.instituteName,
-        'Room': session.roomNumber,
-        'Inspector': session.teacherName,
-        'Started': AppDateFormat.fullDateTime(session.startTime),
-        'Ended': session.endTime == null
-            ? 'In progress'
-            : AppDateFormat.fullDateTime(session.endTime!),
-        'Duration': AppDateFormat.duration(session.duration),
-      },
-      summary:
-          'Incidents: ${logs.length}  ·  '
-          'Critical: ${count(LogSeverity.critical)}  ·  '
-          'High: ${count(LogSeverity.high)}  ·  '
-          'Medium: ${count(LogSeverity.medium)}  ·  '
-          'Low: ${count(LogSeverity.low)}',
-      tableHeaders: const [
-        'Time',
-        'Severity',
-        'Device',
-        'Device ID',
-        'Location',
-        'Notes',
+      brand: 'ExamGuard',
+      title: 'Exam Security Session Report',
+      headerMeta: [
+        PdfMetaItem('Generated', generated),
+        PdfMetaItem('Report ID', reportId(session)),
+      ],
+      metaTitle: 'Session details',
+      metaRows: [
+        PdfMetaItem('Institute', session.instituteName),
+        PdfMetaItem('Room', session.roomNumber),
+        PdfMetaItem('Inspector', session.teacherName),
+        PdfMetaItem('Duration', AppDateFormat.duration(session.duration)),
+        PdfMetaItem('Started', AppDateFormat.fullDateTime(session.startTime)),
+        PdfMetaItem(
+          'Ended',
+          session.endTime == null
+              ? 'In progress'
+              : AppDateFormat.fullDateTime(session.endTime!),
+        ),
+      ],
+      summaryTitle: 'Summary',
+      summaryItems: [
+        PdfSummaryItem(label: 'Total', value: '${logs.length}'),
+        for (final s in LogSeverity.values)
+          PdfSummaryItem(
+            label: _titleCase(s.code),
+            value: '${count(s)}',
+            color: severityColor(s),
+          ),
+      ],
+      summaryText: verdict(logs),
+      summaryColor: logs.isEmpty
+          ? _clear
+          : criticalCount > 0
+          ? _critical
+          : _high,
+      tableTitle: 'Incident log',
+      tableColumns: const [
+        PdfTableColumn('Time', flex: 1.2),
+        PdfTableColumn('Severity', flex: 1.15),
+        PdfTableColumn('Category', flex: 1.2),
+        PdfTableColumn('Device', flex: 1.5),
+        PdfTableColumn('Device ID', flex: 1.8),
+        PdfTableColumn('Location', flex: 1.2),
+        PdfTableColumn('Notes', flex: 2.5),
       ],
       tableRows: [
         for (final l in logs)
           [
-            AppDateFormat.clock(l.createdAt),
-            l.severity.code,
-            _orDash(l.deviceName),
-            _orDash(l.deviceId),
-            _orDash(l.location),
-            _orDash(l.notes),
+            PdfTableCell(AppDateFormat.clock(l.createdAt)),
+            PdfTableCell(l.severity.code, color: severityColor(l.severity)),
+            PdfTableCell(_orDash(l.category)),
+            PdfTableCell(_orDash(l.deviceName), bold: true),
+            PdfTableCell(_orDash(l.deviceId)),
+            PdfTableCell(_orDash(l.location)),
+            PdfTableCell(_orDash(l.notes)),
           ],
       ],
-      emptyTableText: 'No incidents were logged during this session.',
-      closingText: 'Inspector signature: ______________________________',
+      emptyTableTitle: 'No incidents were logged during this session.',
+      emptyTableText:
+          'The invigilator recorded no device violations between the start '
+          'and end of this session.',
+      signatures: [
+        PdfSignatureBlock(role: 'Invigilator', name: session.teacherName),
+        const PdfSignatureBlock(role: 'Exam Controller'),
+      ],
+      footerText: 'Generated by ExamGuard · $generated',
     );
   }
+
+  static String _titleCase(String v) =>
+      v.isEmpty ? v : v[0].toUpperCase() + v.substring(1).toLowerCase();
 }
 
 final reportRepositoryProvider = Provider<ReportRepository>(

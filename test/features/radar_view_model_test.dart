@@ -26,6 +26,11 @@ class FakeBluetoothService implements IBluetoothService {
   @override
   Stream<BleScanRecord> get scanRecords => records.stream;
 
+  final problems = StreamController<BleScanError?>.broadcast();
+
+  @override
+  Stream<BleScanError?> get scanProblem => problems.stream;
+
   @override
   Future<void> startScan(String owner) async {
     if (startError != null) throw startError!;
@@ -198,6 +203,46 @@ void main() {
       expect(state.errorKey, 'radar_err_scan_failed');
       expect(state.hasLiveSignal, isFalse);
     });
+
+    test(
+      'Location off shows the location reason and clears by itself',
+      () async {
+        final notifier = container.read(
+          trackingRadarViewModelProvider.notifier,
+        );
+        await notifier.setTargetDevice(target());
+        bluetooth.records.add(record('AA:BB', -60));
+        await pumpEventQueue();
+        expect(
+          container.read(trackingRadarViewModelProvider).hasLiveSignal,
+          isTrue,
+        );
+
+        bluetooth.problems.add(BleScanError.locationOff);
+        await pumpEventQueue();
+        var state = container.read(trackingRadarViewModelProvider);
+        expect(state.isLocationOff, isTrue);
+        expect(state.errorKey, TrackingRadarViewModel.locationOffErrorKey);
+        expect(state.hasLiveSignal, isFalse);
+        expect(bluetooth.owners, contains('tracking_radar'));
+
+        bluetooth.problems.add(null);
+        await pumpEventQueue();
+        state = container.read(trackingRadarViewModelProvider);
+        expect(state.isLocationOff, isFalse);
+        expect(state.errorKey, isNull);
+        // Waits for a fresh packet instead of the pre-outage distance.
+        expect(state.isAcquiring, isTrue);
+        expect(state.distanceMeters, isNull);
+
+        bluetooth.records.add(record('AA:BB', -62));
+        await pumpEventQueue();
+        expect(
+          container.read(trackingRadarViewModelProvider).hasLiveSignal,
+          isTrue,
+        );
+      },
+    );
 
     test('scan stream errors are shown as an error', () async {
       await container

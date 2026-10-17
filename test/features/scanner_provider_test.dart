@@ -24,6 +24,11 @@ class FakeBluetoothService implements IBluetoothService {
   @override
   Stream<BleScanRecord> get scanRecords => records.stream;
 
+  final problems = StreamController<BleScanError?>.broadcast();
+
+  @override
+  Stream<BleScanError?> get scanProblem => problems.stream;
+
   @override
   Future<void> startScan(String owner) async {
     if (startError != null) throw startError!;
@@ -46,6 +51,8 @@ class FakeBluetoothService implements IBluetoothService {
 
 class GrantedPermissions implements IPermissionService {
   int requests = 0;
+  int locationSettingsOpened = 0;
+  bool canOpenLocationSettings = true;
 
   @override
   Future<AppPermissionStatus> requestBluetoothScan() async {
@@ -55,6 +62,12 @@ class GrantedPermissions implements IPermissionService {
 
   @override
   Future<bool> openSettings() async => true;
+
+  @override
+  Future<bool> openLocationSettings() async {
+    locationSettingsOpened++;
+    return canOpenLocationSettings;
+  }
 }
 
 BleScanRecord record(
@@ -63,13 +76,14 @@ BleScanRecord record(
   String? name,
   DateTime? at,
   Map<int, List<int>> manufacturerData = const {},
+  List<String> serviceUuids = const [],
 }) => BleScanRecord(
   id: id,
   name: name ?? 'Phone $id',
   rssi: rssi,
   txPower: null,
   isConnectable: true,
-  serviceUuids: const [],
+  serviceUuids: serviceUuids,
   manufacturerData: manufacturerData,
   timestamp: at ?? DateTime.now(),
 );
@@ -123,8 +137,137 @@ void main() {
     final state = container.read(scannerViewModelProvider);
     expect(state.devices.single.isConnected, isFalse);
     expect(state.devices.single.batteryLevel, isNull);
-    expect(state.errorMessage, 'scan_err_connect_failed');
-    expect(state.errorArgs['name'], isNotEmpty);
+    // A failed connect is a one-off notice, never a blocking scan error.
+    expect(state.errorMessage, isNull);
+    expect(state.isScanning, isTrue);
+    expect(state.noticeKey, 'scan_err_connect_failed');
+    expect(state.noticeArgs['name'], isNotEmpty);
+  });
+
+  test('every notice gets a new id, even when it repeats', () async {
+    bluetooth.records.add(record('AA:BB', -60));
+    await pumpEventQueue();
+    final notifier = container.read(scannerViewModelProvider.notifier);
+
+    await notifier.probeDeviceConnection('AA:BB');
+    final first = container.read(scannerViewModelProvider).noticeId;
+    await notifier.probeDeviceConnection('AA:BB');
+    final second = container.read(scannerViewModelProvider).noticeId;
+
+    expect(second, greaterThan(first));
+    expect(container.read(scannerViewModelProvider).errorMessage, isNull);
+  });
+
+  group('location off', () {
+    test('isLocationOff follows the scan problem stream', () async {
+      expect(container.read(scannerViewModelProvider).isLocationOff, isFalse);
+
+      bluetooth.problems.add(BleScanError.locationOff);
+      await pumpEventQueue();
+      var state = container.read(scannerViewModelProvider);
+      expect(state.isLocationOff, isTrue);
+      expect(state.errorMessage, isNull);
+      // The owner stays registered so core resumes the scan by itself.
+      expect(state.isScanning, isTrue);
+      expect(bluetooth.owners, contains('wireless_scanner'));
+      expect(
+        state.emptyReason(DeviceFilter.all),
+        ScannerEmptyReason.locationOff,
+      );
+
+      bluetooth.problems.add(null);
+      await pumpEventQueue();
+      state = container.read(scannerViewModelProvider);
+      expect(state.isLocationOff, isFalse);
+      expect(state.isScanning, isTrue);
+      expect(bluetooth.owners, contains('wireless_scanner'));
+    });
+
+    test('openLocationSettings opens the system page', () async {
+      await container
+          .read(scannerViewModelProvider.notifier)
+          .openLocationSettings();
+      expect(permissions.locationSettingsOpened, 1);
+      expect(container.read(scannerViewModelProvider).noticeKey, isNull);
+    });
+
+    test('a notice explains when Location settings cannot open', () async {
+      permissions.canOpenLocationSettings = false;
+      await container
+          .read(scannerViewModelProvider.notifier)
+          .openLocationSettings();
+      final state = container.read(scannerViewModelProvider);
+      expect(state.noticeKey, 'scan_notice_location_settings');
+      expect(state.errorMessage, isNull);
+    });
+  });
+
+  test(
+    'simultaneous nameless addresses of one phone show as one group',
+    () async {
+      final now = DateTime.now();
+      for (final id in ['AA:01', 'AA:02', 'AA:03']) {
+        bluetooth.records.add(
+          record(
+            id,
+            id == 'AA:02' ? -50 : -49,
+            name: '',
+            at: now,
+            manufacturerData: const {
+              0x004C: [0x10, 0x05, 0x01],
+            },
+          ),
+        );
+      }
+      await pumpEventQueue();
+
+      final state = container.read(scannerViewModelProvider);
+      expect(state.devices, hasLength(3));
+      expect(state.groups, hasLength(1));
+      expect(state.groups.single.members.map((d) => d.id).toSet(), {
+        'AA:01',
+        'AA:02',
+        'AA:03',
+      });
+      expect(state.visibleGroups(DeviceFilter.all), hasLength(1));
+    },
+  );
+
+  group('empty reasons', () {
+    test('a filter that hides everything is not "scanning"', () async {
+      bluetooth.records.add(record('AA:BB', -80, name: 'Galaxy S24'));
+      await pumpEventQueue();
+
+      final state = container.read(scannerViewModelProvider);
+      expect(state.emptyReason(DeviceFilter.all), isNull);
+      expect(
+        state.emptyReason(DeviceFilter.covertEsp),
+        ScannerEmptyReason.filteredOut,
+      );
+    });
+
+    test('a room boundary that hides everything says so', () async {
+      bluetooth.records.add(record('AA:BB', -98, name: 'Far phone'));
+      await pumpEventQueue();
+      container
+          .read(scannerViewModelProvider.notifier)
+          .toggleRoomBoundaryMode(true);
+
+      final state = container.read(scannerViewModelProvider);
+      expect(state.activeGroups, isEmpty);
+      expect(state.groups, hasLength(1));
+      expect(
+        state.emptyReason(DeviceFilter.all),
+        ScannerEmptyReason.outsideBoundary,
+      );
+    });
+
+    test('nothing heard yet while scanning is "waiting"', () {
+      expect(
+        container.read(scannerViewModelProvider).emptyReason(DeviceFilter.all),
+        ScannerEmptyReason.waiting,
+      );
+    });
   });
 
   test('stopping the scan releases the radio', () async {
@@ -186,16 +329,32 @@ void main() {
     final notifier = container.read(scannerViewModelProvider.notifier);
     await notifier.toggleScanning(false);
     bluetooth.startError = const BleScanException(
-      'Turn on Location (GPS)',
-      code: BleScanError.locationOff,
+      'Too frequently',
+      code: BleScanError.throttled,
     );
 
     await notifier.toggleScanning(true);
 
     expect(
       container.read(scannerViewModelProvider).errorMessage,
-      'scan_err_location',
+      'scan_err_throttled',
     );
+  });
+
+  test('Location off at start is not a scan failure', () async {
+    final notifier = container.read(scannerViewModelProvider.notifier);
+    await notifier.toggleScanning(false);
+    bluetooth.startError = const BleScanException(
+      'Turn on Location (GPS)',
+      code: BleScanError.locationOff,
+    );
+
+    await notifier.toggleScanning(true);
+
+    final state = container.read(scannerViewModelProvider);
+    expect(state.errorMessage, isNull);
+    expect(state.isLocationOff, isTrue);
+    expect(state.isScanning, isTrue);
   });
 
   test('overlapping start requests ask for permissions once', () async {

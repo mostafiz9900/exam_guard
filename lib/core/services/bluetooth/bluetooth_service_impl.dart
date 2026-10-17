@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
@@ -25,6 +27,15 @@ class BluetoothServiceImpl implements IBluetoothService {
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
   Timer? _restartTimer;
 
+  /// Android delivers no BLE results while Location is off (we use location
+  /// for scanning, see AndroidManifest), and a scan started then stays empty.
+  /// Watch it, report it, and restart the radio once it is back on.
+  static const Duration _locationPollInterval = Duration(seconds: 2);
+  Timer? _locationTimer;
+  BleScanError? _problem;
+  final StreamController<BleScanError?> _problems =
+      StreamController<BleScanError?>.broadcast();
+
   /// Start/stop requests run one at a time. Overlapping calls used to start
   /// the radio twice, and Android blocks all results for 30 s after 5 scan
   /// starts in 30 s, so the list stopped updating.
@@ -42,6 +53,28 @@ class BluetoothServiceImpl implements IBluetoothService {
 
   @override
   Stream<BleScanRecord> get scanRecords => _records.stream;
+
+  @override
+  Stream<BleScanError?> get scanProblem async* {
+    yield _problem;
+    yield* _problems.stream;
+  }
+
+  void _setProblem(BleScanError? problem) {
+    if (problem == _problem) return;
+    _problem = problem;
+    _problems.add(problem);
+  }
+
+  Future<bool> _isLocationOff() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return !(await Permission.location.serviceStatus.isEnabled);
+    } catch (e, st) {
+      _logger.warning('Location service check failed', e, st);
+      return false;
+    }
+  }
 
   @override
   Future<void> startScan(String owner) {
@@ -66,6 +99,9 @@ class BluetoothServiceImpl implements IBluetoothService {
     if (_owners.isEmpty) {
       _restartTimer?.cancel();
       _restartTimer = null;
+      _locationTimer?.cancel();
+      _locationTimer = null;
+      _setProblem(null);
       await _adapterSub?.cancel();
       _adapterSub = null;
       await _resultsSub?.cancel();
@@ -105,6 +141,20 @@ class BluetoothServiceImpl implements IBluetoothService {
       });
     });
 
+    _locationTimer ??= Timer.periodic(_locationPollInterval, (_) {
+      _serial(_sync).catchError((Object e, StackTrace st) {
+        _records.addError(e, st);
+      });
+    });
+
+    if (await _isLocationOff()) {
+      _setProblem(BleScanError.locationOff);
+      if (FlutterBluePlus.isScanningNow) await _stopRadio();
+      return;
+    }
+    _setProblem(null);
+    // With Bluetooth off the adapter listener restarts the scan later.
+    if (FlutterBluePlus.adapterStateNow != BluetoothAdapterState.on) return;
     if (!FlutterBluePlus.isScanningNow) await _startRadio();
   }
 
@@ -188,6 +238,8 @@ class BluetoothServiceImpl implements IBluetoothService {
   Future<void> dispose() async {
     _owners.clear();
     _restartTimer?.cancel();
+    _locationTimer?.cancel();
+    await _problems.close();
     await _adapterSub?.cancel();
     await _resultsSub?.cancel();
     await _stopRadio();
