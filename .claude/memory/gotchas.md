@@ -89,3 +89,16 @@
 #### Scanner state — blocking errors vs one-off notices
 - **How to Avoid**: `errorMessage` = blocking scan problem (drives dashboard "SCAN FAILED"); `noticeKey`/`noticeId` = snackbar-only (connect failed etc.).
 - **Discovered**: 2026-10-17
+
+#### Classic BT discovery degrades BLE scanning
+- **How to Avoid**: `ClassicBluetoothServiceImpl` runs ~12 s inquiries with 20 s pauses while owners exist. Classic discovery also returns nothing with Location off (like BLE).
+- **Discovered**: 2026-10-18
+
+#### Wi-Fi scan permission differs from BLE
+- **How to Avoid**: NEARBY_WIFI_DEVICES uses `neverForLocation` (Wi-Fi results aren't filtered); BLUETOOTH_SCAN must NOT (beacons get filtered). Android throttles foreground Wi-Fi scans to 4 / 2 min → `WifiScanServiceImpl` scans every 30 s. Developer option "Wi-Fi scan throttling" changes behaviour on test phones.
+- **Discovered**: 2026-10-18
+
+#### Riverpod 3 filters updates with == — keep model equality complete
+- **What Happens**: `SessionModel ==` ignored new fields → trusting a device wouldn't notify listeners.
+- **How to Avoid**: When adding fields to a state model, add them to `==`/`hashCode`.
+- **Discovered**: 2026-10-18

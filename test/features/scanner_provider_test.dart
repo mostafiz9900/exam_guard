@@ -115,13 +115,15 @@ void main() {
     expect(bluetooth.owners, contains('wireless_scanner'));
   });
 
-  test('every advertisement updates the device list immediately', () async {
+  test('a new device shows at once; its values update within 250 ms', () async {
     bluetooth.records.add(record('AA:BB', -70));
     await pumpEventQueue();
     expect(container.read(scannerViewModelProvider).devices.single.rssi, -70);
 
     bluetooth.records.add(record('AA:BB', -50));
     await pumpEventQueue();
+    // Value updates are coalesced (at most ~4 publishes a second).
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     final rssi = container.read(scannerViewModelProvider).devices.single.rssi;
     expect(rssi, greaterThan(-70));
   });

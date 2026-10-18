@@ -11,6 +11,18 @@ class AppRoute {
   static const String actionNew = '/action/new';
   static const String report = '/report';
 
+  /// Hands-free finder: vibrates when the inspector walks near any of the
+  /// chosen devices. `extra` is a `List<ScannedDeviceModel>`.
+  static const String walkFinder = '/walk-finder';
+
+  /// Seat sweep: record a device's signal at each seat to find the strongest
+  /// seat. `extra` is a `ScannedDeviceModel`.
+  static const String seatSweep = '/seat-sweep';
+
+  /// Past exams. Only reachable while no exam is running (opening an old
+  /// report would otherwise replace the running exam in memory).
+  static const String history = '/history';
+
   /// Routes that only make sense while an exam is running.
   static const Set<String> requireActiveSession = {
     dashboard,
@@ -19,5 +31,7 @@ class AppRoute {
     magnetic,
     rfDetector,
     actionNew,
+    walkFinder,
+    seatSweep,
   };
 }

@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:exam_guard/core/services/audio/haptic_service.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
+import 'package:exam_guard/core/services/wakelock/i_wakelock_service.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
 import 'package:exam_guard/features/radar/view_model/tracking_radar_view_model.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+import 'radar/finder_fakes.dart' show FakeHaptics, FakeWakelock;
 
 class FakeBluetoothService implements IBluetoothService {
   final records = StreamController<BleScanRecord>.broadcast();
@@ -162,15 +166,97 @@ void main() {
 
   group('TrackingRadarViewModel', () {
     late FakeBluetoothService bluetooth;
+    late FakeWakelock wakelock;
+    late FakeHaptics haptics;
     late ProviderContainer container;
+
+    ProviderContainer create() {
+      final c = ProviderContainer(
+        overrides: [
+          bluetoothServiceProvider.overrideWithValue(bluetooth),
+          wakelockServiceProvider.overrideWithValue(wakelock),
+          hapticServiceProvider.overrideWithValue(haptics),
+        ],
+      );
+      c.listen(trackingRadarViewModelProvider, (_, _) {});
+      return c;
+    }
 
     setUp(() {
       bluetooth = FakeBluetoothService();
-      container = ProviderContainer(
-        overrides: [bluetoothServiceProvider.overrideWithValue(bluetooth)],
-      );
-      container.listen(trackingRadarViewModelProvider, (_, _) {});
+      wakelock = FakeWakelock();
+      haptics = FakeHaptics();
+      container = create();
     });
+
+    test('keeps the screen on while open, releases it on dispose', () {
+      expect(wakelock.owners, {'tracking_radar'});
+      container.dispose();
+      expect(wakelock.owners, isEmpty);
+      expect(wakelock.calls, [
+        'enable:tracking_radar',
+        'disable:tracking_radar',
+      ]);
+      container = create();
+    });
+
+    test('closeness, peak hold and reset', () async {
+      final notifier = container.read(trackingRadarViewModelProvider.notifier);
+      await notifier.setTargetDevice(target());
+      final start = DateTime(2026);
+      var state = container.read(trackingRadarViewModelProvider);
+      expect(state.closeness, isNull);
+      expect(state.peakCloseness, isNull);
+
+      // Approaches to -50 dBm, then walks away to -80 dBm.
+      for (var i = 0; i < 30; i++) {
+        notifier.updateDeviceSignal(
+          -50,
+          start.add(Duration(milliseconds: 100 * i)),
+        );
+      }
+      state = container.read(trackingRadarViewModelProvider);
+      expect(state.closeness, 90);
+      expect(state.peakCloseness, 90);
+      for (var i = 30; i < 60; i++) {
+        notifier.updateDeviceSignal(
+          -80,
+          start.add(Duration(milliseconds: 100 * i)),
+        );
+      }
+      state = container.read(trackingRadarViewModelProvider);
+      expect(state.closeness, 30);
+      expect(state.peakCloseness, 90, reason: 'best so far is held');
+      expect(state.peakRssi!.round(), -50);
+
+      notifier.resetPeak();
+      state = container.read(trackingRadarViewModelProvider);
+      expect(state.peakCloseness, isNull);
+      notifier.updateDeviceSignal(-80, start.add(const Duration(seconds: 7)));
+      notifier.updateDeviceSignal(-80, start.add(const Duration(seconds: 8)));
+      notifier.updateDeviceSignal(-80, start.add(const Duration(seconds: 9)));
+      expect(container.read(trackingRadarViewModelProvider).peakCloseness, 30);
+    });
+
+    test(
+      'vibrates harder when closer, rate-limited, and can be muted',
+      () async {
+        final notifier = container.read(
+          trackingRadarViewModelProvider.notifier,
+        );
+        await notifier.setTargetDevice(target());
+        for (var i = 0; i < 20; i++) {
+          notifier.updateDeviceSignal(-48);
+        }
+        expect(haptics.pulses, [HapticStrength.heavy]);
+
+        notifier.toggleVibration();
+        haptics.pulses.clear();
+        await Future<void>.delayed(const Duration(milliseconds: 450));
+        notifier.updateDeviceSignal(-48);
+        expect(haptics.pulses, isEmpty);
+      },
+    );
 
     tearDown(() => container.dispose());
 

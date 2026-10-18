@@ -9,12 +9,14 @@ import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
+import 'package:exam_guard/core/services/classic_bluetooth/i_classic_bluetooth_service.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 import 'package:exam_guard/core/theme/app_theme.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/scanner/view/widgets/location_off_banner.dart';
 import 'package:exam_guard/features/scanner/view/widgets/professional_device_card.dart';
 import 'package:exam_guard/features/scanner/view/widgets/scanner_empty_state.dart';
+import 'package:exam_guard/features/scanner/view/widgets/walk_selection_bar.dart';
 import 'package:exam_guard/features/scanner/view/wireless_scanner_screen.dart';
 import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:flutter/material.dart';
@@ -89,6 +91,25 @@ BleScanRecord _apple(String id, int rssi, {String name = ''}) => BleScanRecord(
   timestamp: DateTime.now(),
 );
 
+class _FakeClassic implements IClassicBluetoothService {
+  final records = StreamController<ClassicBtRecord>.broadcast();
+
+  @override
+  bool get isSupported => true;
+
+  @override
+  Stream<ClassicBtRecord> get discoveries => records.stream;
+
+  @override
+  Future<void> start(String owner) async {}
+
+  @override
+  Future<void> stop(String owner) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
 var _boundary = GlobalKey();
 
 Future<void> _loadFonts() async {
@@ -133,6 +154,7 @@ Future<void> _pumpScreen(
   _FakeBluetooth bluetooth,
   _Permissions permissions, {
   ThemeMode themeMode = ThemeMode.light,
+  IClassicBluetoothService? classic,
 }) async {
   _boundary = GlobalKey();
   // Cached asset futures belong to the previous test's zone and never
@@ -155,6 +177,8 @@ Future<void> _pumpScreen(
           overrides: [
             bluetoothServiceProvider.overrideWithValue(bluetooth),
             permissionServiceProvider.overrideWithValue(permissions),
+            if (classic != null)
+              classicBluetoothServiceProvider.overrideWithValue(classic),
           ],
           child: Builder(
             builder: (context) => AppScreenSize(
@@ -303,6 +327,80 @@ void main() {
     );
     await _settle(tester);
     expect(find.byType(ProfessionalDeviceCard), findsOneWidget);
+
+    await _unmount(tester);
+  });
+
+  testWidgets('classic devices show a badge and cannot be tracked on radar', (
+    tester,
+  ) async {
+    final bluetooth = _FakeBluetooth();
+    final classic = _FakeClassic();
+    await _pumpScreen(tester, bluetooth, _Permissions(), classic: classic);
+
+    classic.records.add(
+      ClassicBtRecord(
+        address: '00:11:22:33:44:55',
+        name: 'Nano Ear',
+        rssi: -60,
+        majorDeviceClass: 0x0400,
+        deviceClass: 0x0404,
+        timestamp: DateTime.now(),
+      ),
+    );
+    bluetooth.records.add(_apple('AA:00:00:00:00:01', -80, name: 'iPhone'));
+    await _settle(tester);
+
+    expect(find.byType(ProfessionalDeviceCard), findsNWidgets(2));
+    expect(find.text('scan_transport_classic'.tr()), findsOneWidget);
+    expect(find.text('scan_high_suspicion'.tr()), findsOneWidget);
+
+    final tracks = tester
+        .widgetList<OutlinedButton>(
+          find.descendant(
+            of: find.byType(ProfessionalDeviceCard),
+            matching: find.byWidgetPredicate((w) => w is OutlinedButton),
+          ),
+        )
+        .toList();
+    expect(tracks, hasLength(2));
+    expect(tracks.where((b) => b.onPressed == null), hasLength(1));
+    expect(find.byTooltip('scan_track_ble_only'.tr()), findsOneWidget);
+    await _shot(tester, 'classic_light');
+
+    await _unmount(tester);
+  });
+
+  testWidgets('long-press starts Walk & find selection; Cancel leaves it', (
+    tester,
+  ) async {
+    final bluetooth = _FakeBluetooth();
+    await _pumpScreen(tester, bluetooth, _Permissions());
+
+    bluetooth.records
+      ..add(_apple('AA:00:00:00:00:01', -60, name: 'iPhone'))
+      ..add(_apple('BB:00:00:00:00:02', -70, name: 'Galaxy Watch6'));
+    await _settle(tester);
+    expect(find.byType(WalkSelectionBar), findsNothing);
+
+    await tester.longPress(find.text('iPhone'));
+    await _settle(tester);
+    final bar = tester.widget<WalkSelectionBar>(find.byType(WalkSelectionBar));
+    expect(bar.count, 1);
+    expect(bar.max, 5);
+
+    // While selecting, a tap picks instead of opening details.
+    await tester.tap(find.text('Galaxy Watch6'));
+    await _settle(tester);
+    expect(
+      tester.widget<WalkSelectionBar>(find.byType(WalkSelectionBar)).count,
+      2,
+    );
+    await _shot(tester, 'selecting_light');
+
+    await tester.tap(find.byTooltip('scan_select_cancel'.tr()));
+    await _settle(tester);
+    expect(find.byType(WalkSelectionBar), findsNothing);
 
     await _unmount(tester);
   });

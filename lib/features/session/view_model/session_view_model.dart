@@ -29,6 +29,8 @@ class SessionViewModel extends Notifier<SessionModel?> {
     required String instituteName,
     required String teacherName,
     required String roomNumber,
+    int? seatRows,
+    int? seatCols,
   }) async {
     // Never leave a running exam orphaned.
     final running = state;
@@ -41,6 +43,8 @@ class SessionViewModel extends Notifier<SessionModel?> {
       teacherName: teacherName,
       roomNumber: roomNumber,
       startTime: DateTime.now(),
+      seatRows: seatRows,
+      seatCols: seatCols,
     );
     await _repository.save(session);
     state = session;
@@ -68,6 +72,51 @@ class SessionViewModel extends Notifier<SessionModel?> {
   /// Clears an ended session so a new exam can be set up.
   void closeEndedSession() {
     if (state != null && !state!.isActive) state = null;
+  }
+
+  /// Every saved exam, newest first (for the exam history screen).
+  List<SessionModel> get allSessions => _repository.allSessions();
+
+  /// Shows a saved exam's report (read-only). False if it doesn't exist.
+  bool openSession(String id) {
+    for (final s in _repository.allSessions()) {
+      if (s.id == id) {
+        state = s;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Records the empty-room baseline: every device seen now is trusted.
+  Future<void> setBaseline(Set<String> deviceIds) =>
+      _updateActive((s) => s.copyWith(
+        trustedDeviceIds: {...s.trustedDeviceIds, ...deviceIds},
+        baselineAt: DateTime.now(),
+      ));
+
+  /// Marks one device as belonging to the room/invigilator.
+  Future<void> trustDevice(String deviceId) => _updateActive(
+    (s) => s.copyWith(trustedDeviceIds: {...s.trustedDeviceIds, deviceId}),
+  );
+
+  Future<void> untrustDevice(String deviceId) => _updateActive(
+    (s) => s.copyWith(
+      trustedDeviceIds: {...s.trustedDeviceIds}..remove(deviceId),
+    ),
+  );
+
+  Future<void> setSeatLayout({required int rows, required int cols}) =>
+      _updateActive((s) => s.copyWith(seatRows: rows, seatCols: cols));
+
+  Future<void> _updateActive(SessionModel Function(SessionModel) change) async {
+    final current = state;
+    if (current == null || !current.isActive) {
+      throw const NoActiveSessionException();
+    }
+    final updated = change(current);
+    await _repository.save(updated);
+    state = updated;
   }
 
   Future<void> addLog(ActionLogModel log) async {

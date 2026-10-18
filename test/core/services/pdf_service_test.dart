@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:exam_guard/core/services/pdf/i_pdf_service.dart';
 import 'package:exam_guard/core/services/pdf/pdf_service_impl.dart';
@@ -84,5 +86,83 @@ void main() {
       service.buildTableDocument(const PdfTableDocument(title: 'x')),
       throwsA(isA<PdfGenerationException>()),
     );
+  });
+
+  group('grid and images', () {
+    // 1×1 PNG.
+    final png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ'
+      'DwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    );
+    late Directory dir;
+
+    setUp(() => dir = Directory.systemTemp.createTempSync('pdf_test'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test(
+      'builds with a grid, image bytes, image files and missing files',
+      () async {
+        final file = File('${dir.path}/photo.png')..writeAsBytesSync(png);
+        final document = PdfTableDocument(
+          title: 'Grid',
+          gridTitle: 'Seat map',
+          grid: const PdfGrid(
+            rows: 5,
+            columns: 6,
+            rowLabels: ['A', 'B', 'C', 'D', 'E'],
+            columnLabels: ['1', '2', '3', '4', '5', '6'],
+            cells: {
+              (2, 3): PdfGridCell(text: '2', color: Color(0xFFB42318)),
+              (0, 0): PdfGridCell(text: '1'),
+            },
+            topLabel: 'FRONT',
+            legend: [PdfLegendItem('Critical', Color(0xFFB42318))],
+            note: 'Number = incidents',
+          ),
+          imagesTitle: 'Evidence photos',
+          images: [
+            PdfImageItem(bytes: png, caption: 'From bytes · Seat C4'),
+            PdfImageItem(path: file.path, caption: 'From file'),
+            PdfImageItem(path: '${dir.path}/gone.jpg', caption: 'Missing'),
+            PdfImageItem(
+              bytes: Uint8List.fromList([1, 2, 3]),
+              caption: 'Corrupt',
+            ),
+          ],
+        );
+
+        int imageObjects(List<int> pdf) =>
+            RegExp(r'/Subtype\s*/Image')
+                .allMatches(String.fromCharCodes(pdf))
+                .length;
+
+        final service = PdfServiceImpl();
+        final bytes = await service.buildTableDocument(document);
+        expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+
+        // Same images one at a time: only the two readable ones embed anything.
+        Future<int> imagesOf(PdfImageItem item) async => imageObjects(
+          await service.buildTableDocument(
+            PdfTableDocument(title: 'x', images: [item]),
+          ),
+        );
+        final perImage = [for (final i in document.images) await imagesOf(i)];
+        expect(perImage[0], greaterThan(0));
+        expect(perImage[1], greaterThan(0));
+        expect(perImage[2], 0, reason: 'missing file is skipped');
+        expect(perImage[3], 0, reason: 'undecodable bytes are skipped');
+        expect(imageObjects(bytes), perImage[0] + perImage[1]);
+      },
+    );
+
+    test('a very wide grid still fits', () async {
+      final bytes = await PdfServiceImpl().buildTableDocument(
+        const PdfTableDocument(
+          title: 'Wide',
+          grid: PdfGrid(rows: 30, columns: 40),
+        ),
+      );
+      expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+    });
   });
 }

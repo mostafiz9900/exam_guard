@@ -13,24 +13,15 @@ import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/report/view_model/report_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/report/view/widgets/incident_log_card.dart';
 import 'package:exam_guard/features/report/view/widgets/meta_info.dart';
 import 'package:exam_guard/features/report/view/widgets/metric_card.dart';
+import 'package:exam_guard/features/report/view/widgets/seat_heat_map.dart';
+import 'package:exam_guard/features/report/view/widgets/severity_style.dart';
+import 'package:exam_guard/features/session/model/session_model.dart';
 
 class ReportSummaryScreen extends ConsumerWidget {
   const ReportSummaryScreen({super.key});
-
-  Color _getSeverityColor(LogSeverity severity) {
-    switch (severity) {
-      case LogSeverity.critical:
-        return const Color(0xFFEF4444);
-      case LogSeverity.high:
-        return const Color(0xFFF97316);
-      case LogSeverity.medium:
-        return const Color(0xFFF59E0B);
-      case LogSeverity.low:
-        return const Color(0xFF10B981);
-    }
-  }
 
   /// Global rect of the tapped widget, used to anchor the iPad share popover.
   static Rect? _originOf(BuildContext context) {
@@ -39,15 +30,58 @@ class ReportSummaryScreen extends ConsumerWidget {
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
-  static String _severityLabel(LogSeverity severity) => switch (severity) {
-    LogSeverity.critical => 'report_severity_critical'.tr(),
-    LogSeverity.high => 'report_severity_high'.tr(),
-    LogSeverity.medium => 'report_severity_medium'.tr(),
-    LogSeverity.low => 'report_severity_low'.tr(),
-  };
-
   static String _orDash(String? value) =>
       value == null || value.trim().isEmpty ? '-' : value;
+
+  /// Lists the incidents recorded at [seat].
+  static Future<void> _showSeatIncidents(
+    BuildContext context,
+    WidgetRef ref,
+    SessionModel session,
+    String seat,
+  ) {
+    final incidents = ref
+        .read(reportViewModelProvider.notifier)
+        .incidentsAtSeat(session, seat);
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.8,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            padding: EdgeInsets.fromLTRB(
+              AppDimens.spacingMedium,
+              0,
+              AppDimens.spacingMedium,
+              AppDimens.spacingLarge,
+            ),
+            children: [
+              Text(
+                'report_seat_incidents_title'.tr(
+                  args: {'seat': seat, 'count': '${incidents.length}'},
+                ),
+                style: Theme.of(sheetContext).textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: AppDimens.spacingSmall),
+              if (incidents.isEmpty)
+                Text('report_seat_no_incidents'.tr())
+              else
+                for (final log in incidents) ...[
+                  IncidentLogCard(log: log),
+                  SizedBox(height: AppDimens.spacingExtraSmall),
+                ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -193,6 +227,42 @@ class ReportSummaryScreen extends ConsumerWidget {
                               ),
                             ],
                           ),
+                          if (session != null) ...[
+                            SizedBox(height: AppDimens.spacingSmall),
+                            Row(
+                              children: [
+                                Icon(
+                                  session.hasBaseline
+                                      ? Icons.verified_outlined
+                                      : Icons.info_outline_rounded,
+                                  size: 16.w,
+                                  color: session.hasBaseline
+                                      ? AppColors.success
+                                      : colors.onSurfaceVariant,
+                                ),
+                                SizedBox(width: 6.w),
+                                Expanded(
+                                  child: Text(
+                                    session.baselineAt == null
+                                        ? 'report_baseline_none'.tr()
+                                        : 'report_baseline_taken'.tr(
+                                            args: {
+                                              'time': AppDateFormat.clock(
+                                                session.baselineAt!,
+                                              ),
+                                              'count':
+                                                  '${session.trustedDeviceIds.length}',
+                                            },
+                                          ),
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: colors.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -206,7 +276,7 @@ class ReportSummaryScreen extends ConsumerWidget {
                         child: MetricCard(
                           title: 'report_critical_violations'.tr(),
                           count: '$criticalCount',
-                          color: _getSeverityColor(LogSeverity.critical),
+                          color: reportSeverityColor(LogSeverity.critical),
                           icon: Icons.error_outline_rounded,
                         ),
                       ),
@@ -215,7 +285,7 @@ class ReportSummaryScreen extends ConsumerWidget {
                         child: MetricCard(
                           title: 'report_high_threats'.tr(),
                           count: '$highCount',
-                          color: _getSeverityColor(LogSeverity.high),
+                          color: reportSeverityColor(LogSeverity.high),
                           icon: Icons.warning_amber_rounded,
                         ),
                       ),
@@ -232,6 +302,41 @@ class ReportSummaryScreen extends ConsumerWidget {
                   ),
                   SizedBox(height: AppDimens.spacingLarge),
 
+                  if (session != null && session.hasSeatLayout) ...[
+                    Text(
+                      'report_seat_map'.tr(),
+                      style: Theme.of(context).textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 2.h),
+                    Text(
+                      'report_seat_map_hint'.tr(),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: colors.onSurfaceVariant),
+                    ),
+                    SizedBox(height: AppDimens.spacingSmall),
+                    Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppDimens.radiusMedium,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(AppDimens.spacingSmall),
+                        child: SeatHeatMap(
+                          rows: session.seatRows!,
+                          cols: session.seatCols!,
+                          summaries: ref
+                              .read(reportViewModelProvider.notifier)
+                              .seatSummaries(session),
+                          onSeatTap: (seat) =>
+                              _showSeatIncidents(context, ref, session, seat),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: AppDimens.spacingLarge),
+                  ],
                   Text(
                     'report_incident_logs'.tr(
                       args: {'count': '${logs.length}'},
@@ -280,122 +385,8 @@ class ReportSummaryScreen extends ConsumerWidget {
                           itemCount: logs.length,
                           separatorBuilder: (_, _) =>
                               SizedBox(height: AppDimens.spacingSmall),
-                          itemBuilder: (_, index) {
-                            final log = logs[index];
-                            final color = _getSeverityColor(log.severity);
-
-                            return Card(
-                              elevation: 1.5,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(
-                                  AppDimens.radiusMedium,
-                                ),
-                                side: BorderSide(
-                                  color: color.withValues(alpha: 0.2),
-                                ),
-                              ),
-                              child: ListTile(
-                                leading: Container(
-                                  padding: EdgeInsets.all(8.w),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: color.withValues(alpha: 0.12),
-                                  ),
-                                  child: Icon(
-                                    Icons.report_problem_rounded,
-                                    color: color,
-                                    size: 20.w,
-                                  ),
-                                ),
-                                title: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        log.deviceName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 8.w,
-                                        vertical: 2.h,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: color.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(
-                                          8.r,
-                                        ),
-                                      ),
-                                      child: Text(
-                                        _severityLabel(log.severity),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall
-                                            ?.copyWith(
-                                              color: color,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    SizedBox(height: 4.h),
-                                    Text(
-                                      'report_log_details'.tr(
-                                        args: {
-                                          'location':
-                                              log.location.trim().isEmpty
-                                              ? 'report_not_recorded'.tr()
-                                              : log.location,
-                                          'id': _orDash(log.deviceId),
-                                        },
-                                      ),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: colors.onSurfaceVariant,
-                                          ),
-                                    ),
-                                    if (log.notes.isNotEmpty) ...[
-                                      SizedBox(height: 2.h),
-                                      Text(
-                                        'report_note'.tr(
-                                          args: {'note': log.notes},
-                                        ),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              fontStyle: FontStyle.italic,
-                                            ),
-                                      ),
-                                    ],
-                                    SizedBox(height: 4.h),
-                                    Text(
-                                      AppDateFormat.shortDateTime(
-                                        log.createdAt,
-                                      ),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            color: colors.onSurfaceVariant,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
+                          itemBuilder: (_, index) =>
+                              IncidentLogCard(log: logs[index]),
                         ),
                   SizedBox(height: AppDimens.spacingLarge),
 

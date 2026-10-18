@@ -8,6 +8,9 @@ import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/custom_text_field.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
 import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
+import 'package:exam_guard/features/action_log/model/incident_categories.dart';
+import 'package:exam_guard/features/action_log/view/widgets/photo_evidence_section.dart';
+import 'package:exam_guard/features/action_log/view/widgets/seat_picker_sheet.dart';
 import 'package:exam_guard/features/action_log/view_model/action_entry_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -15,16 +18,7 @@ import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 
 /// Incident categories offered in the form: stored value → label key.
-/// The stored values are English and must not change.
-const _categories = <String, String>{
-  'Bluetooth Device': 'incident_cat_bluetooth',
-  'Magnetic Anomaly': 'incident_cat_magnetic',
-  'RF Transmitter': 'incident_cat_rf',
-  'Active Cellular SIM Call': 'incident_cat_sim_call',
-  'Online VoIP Call': 'incident_cat_voip_call',
-  'Mobile 4G/5G Data Usage': 'incident_cat_mobile_data',
-  'Suspicious Activity': 'incident_cat_suspicious',
-};
+const _categories = IncidentCategory.labelKeys;
 
 /// Display label of a severity; the stored code stays English.
 String _severityLabel(LogSeverity severity) => switch (severity) {
@@ -61,13 +55,17 @@ class ActionEntryScreen extends HookConsumerWidget {
     final location = useTextEditingController();
     final notes = useTextEditingController(text: args.notes ?? '');
 
-    final initialCategory = (args.category?.trim().isNotEmpty ?? false)
-        ? args.category!.trim()
-        : 'Bluetooth Device';
+    final initialCategory = IncidentCategory.initial(
+      category: args.category,
+      device: args.device,
+    );
     final selectedType = useState(initialCategory);
     final selectedSeverity = useState(LogSeverity.high);
+    final seat = useState<String?>(null);
     final viewModel = ref.read(actionEntryViewModelProvider.notifier);
-    final isSaving = ref.watch(actionEntryViewModelProvider).isSaving;
+    final entryState = ref.watch(actionEntryViewModelProvider);
+    final isSaving = entryState.isSaving;
+    final seatLayout = viewModel.seatLayout;
 
     // A category passed in by a scanner is offered even if it is not listed
     // (shown as passed, since it has no translation).
@@ -131,6 +129,7 @@ class ActionEntryScreen extends HookConsumerWidget {
         severity: selectedSeverity.value,
         location: location.text,
         notes: notes.text,
+        seat: seatLayout == null ? null : seat.value,
       );
       if (!context.mounted) return;
 
@@ -152,188 +151,331 @@ class ActionEntryScreen extends HookConsumerWidget {
       }
     }
 
+    Future<void> pickSeat() async {
+      final layout = seatLayout;
+      if (layout == null) return;
+      final picked = await showSeatPickerSheet(
+        context,
+        rows: layout.rows,
+        cols: layout.cols,
+        summaries: viewModel.seatSummaries,
+        selected: seat.value,
+      );
+      if (picked != null) seat.value = picked;
+    }
+
+    Future<void> addPhoto() async {
+      final messenger = ScaffoldMessenger.of(context);
+      final message = await viewModel.addPhoto();
+      if (message != null) {
+        showSnack(
+          messenger,
+          message.tr(args: {'max': '${ActionEntryViewModel.maxPhotos}'}),
+          message == 'incident_photo_limit' ? null : AppColors.error,
+        );
+      }
+    }
+
+    /// Leaving with photos discards them; ask first.
+    Future<void> confirmLeave() async {
+      if (!viewModel.hasUnsavedPhotos) {
+        Navigator.of(context).pop();
+        return;
+      }
+      final leave = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('incident_discard_title'.tr()),
+          content: Text('incident_discard_message'.tr()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text('incident_keep_editing'.tr()),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: colors.error),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text('incident_discard_confirm'.tr()),
+            ),
+          ],
+        ),
+      );
+      // The view model deletes the photos when the screen is disposed.
+      if (leave == true && context.mounted) Navigator.of(context).pop();
+    }
+
     final fieldBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
       borderSide: BorderSide(color: colors.outline, width: 1.w),
     );
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('log_action'.tr()),
-        actions: const [AppSettingsMenu()],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 580),
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(AppDimens.spacingLarge),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'incident_form_title'.tr(),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 4.h),
-                  Text(
-                    'incident_form_subtitle'.tr(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                  SizedBox(height: AppDimens.spacingLarge),
-
-                  // Incident Type Dropdown
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedType.value,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: 'incident_category'.tr(),
-                      prefixIcon: const Icon(Icons.category_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          AppDimens.radiusMedium,
-                        ),
+    return PopScope(
+      canPop: entryState.photoPaths.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) confirmLeave();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('log_action'.tr()),
+          actions: const [AppSettingsMenu()],
+        ),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 580),
+              child: SingleChildScrollView(
+                padding: EdgeInsets.all(AppDimens.spacingLarge),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'incident_form_title'.tr(),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    items: [
-                      for (final c in categories.entries)
-                        DropdownMenuItem(
-                          value: c.key,
-                          child: Text(c.value, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) selectedType.value = val;
-                    },
-                  ),
-                  SizedBox(height: AppDimens.spacingMedium),
-
-                  // Severity Choice Chips
-                  Text(
-                    'incident_severity_level'.tr(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 6.h),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: LogSeverity.values.map((sev) {
-                        final isSelected = selectedSeverity.value == sev;
-                        return Padding(
-                          padding: EdgeInsets.only(right: 8.w),
-                          child: ChoiceChip(
-                            label: Text(_severityLabel(sev)),
-                            selected: isSelected,
-                            selectedColor: sev == LogSeverity.critical
-                                ? AppColors.error.withValues(alpha: 0.2)
-                                : colors.primary.withValues(alpha: 0.2),
-                            onSelected: (_) => selectedSeverity.value = sev,
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  SizedBox(height: AppDimens.spacingMedium),
-
-                  CustomTextField(
-                    hintText: 'incident_device_name_hint'.tr(),
-                    controller: deviceName,
-                    prefixIcon: const Icon(Icons.devices_other_outlined),
-                  ),
-                  SizedBox(height: AppDimens.spacingMedium),
-
-                  CustomTextField(
-                    hintText: 'incident_device_id_hint'.tr(),
-                    controller: deviceId,
-                    prefixIcon: const Icon(Icons.qr_code_outlined),
-                  ),
-                  SizedBox(height: AppDimens.spacingMedium),
-
-                  CustomTextField(
-                    hintText: 'incident_location_hint'.tr(),
-                    controller: location,
-                    prefixIcon: const Icon(Icons.location_on_outlined),
-                  ),
-                  SizedBox(height: AppDimens.spacingMedium),
-
-                  // Multi-line notes (CustomTextField is single-line).
-                  TextField(
-                    controller: notes,
-                    minLines: 3,
-                    maxLines: 4,
-                    keyboardType: TextInputType.multiline,
-                    textCapitalization: TextCapitalization.sentences,
-                    style: TextStyle(
-                      color: colors.onSurface,
-                      fontSize: AppDimens.bodyLarge,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'incident_notes_hint'.tr(),
-                      hintStyle: TextStyle(
+                    SizedBox(height: 4.h),
+                    Text(
+                      'incident_form_subtitle'.tr(),
+                      style: theme.textTheme.bodySmall?.copyWith(
                         color: colors.onSurfaceVariant,
-                        fontSize: AppDimens.bodyMedium,
-                      ),
-                      alignLabelWithHint: true,
-                      filled: true,
-                      fillColor: colors.surface,
-                      prefixIcon: Padding(
-                        padding: EdgeInsets.only(bottom: 40.h),
-                        child: Icon(
-                          Icons.notes_outlined,
-                          color: colors.primary,
-                          size: 20.w,
-                        ),
-                      ),
-                      contentPadding: EdgeInsets.all(AppDimens.spacingMedium),
-                      border: fieldBorder,
-                      enabledBorder: fieldBorder,
-                      focusedBorder: fieldBorder.copyWith(
-                        borderSide: BorderSide(
-                          color: colors.primary,
-                          width: 1.5.w,
-                        ),
                       ),
                     ),
-                  ),
-                  SizedBox(height: AppDimens.spacingLarge),
+                    SizedBox(height: AppDimens.spacingLarge),
 
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: isSaving
-                              ? null
-                              : () => submit(thenShare: true),
-                          icon: const Icon(Icons.description_rounded),
-                          label: Text('incident_save_share'.tr()),
-                          style: OutlinedButton.styleFrom(
-                            padding: EdgeInsets.symmetric(vertical: 12.h),
+                    // Incident Type Dropdown
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedType.value,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'incident_category'.tr(),
+                        prefixIcon: const Icon(Icons.category_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppDimens.radiusMedium,
                           ),
                         ),
                       ),
-                      SizedBox(width: 10.w),
-                      Expanded(
-                        child: PrimaryButton(
-                          label: isSaving
-                              ? 'incident_saving'.tr()
-                              : 'save_record'.tr(),
-                          isLoading: isSaving,
-                          onPressed: () => submit(thenShare: false),
+                      items: [
+                        for (final c in categories.entries)
+                          DropdownMenuItem(
+                            value: c.key,
+                            child: Text(
+                              c.value,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) selectedType.value = val;
+                      },
+                    ),
+                    SizedBox(height: AppDimens.spacingMedium),
+
+                    // Severity Choice Chips
+                    Text(
+                      'incident_severity_level'.tr(),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 6.h),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: LogSeverity.values.map((sev) {
+                          final isSelected = selectedSeverity.value == sev;
+                          return Padding(
+                            padding: EdgeInsets.only(right: 8.w),
+                            child: ChoiceChip(
+                              label: Text(_severityLabel(sev)),
+                              selected: isSelected,
+                              selectedColor: sev == LogSeverity.critical
+                                  ? AppColors.error.withValues(alpha: 0.2)
+                                  : colors.primary.withValues(alpha: 0.2),
+                              onSelected: (_) => selectedSeverity.value = sev,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    SizedBox(height: AppDimens.spacingMedium),
+
+                    CustomTextField(
+                      hintText: 'incident_device_name_hint'.tr(),
+                      controller: deviceName,
+                      prefixIcon: const Icon(Icons.devices_other_outlined),
+                    ),
+                    SizedBox(height: AppDimens.spacingMedium),
+
+                    CustomTextField(
+                      hintText: 'incident_device_id_hint'.tr(),
+                      controller: deviceId,
+                      prefixIcon: const Icon(Icons.qr_code_outlined),
+                    ),
+                    SizedBox(height: AppDimens.spacingMedium),
+
+                    if (seatLayout != null) ...[
+                      _SeatField(
+                        seat: seat.value,
+                        onTap: isSaving ? null : pickSeat,
+                        onClear: isSaving || seat.value == null
+                            ? null
+                            : () => seat.value = null,
+                      ),
+                      SizedBox(height: AppDimens.spacingMedium),
+                    ],
+
+                    CustomTextField(
+                      hintText: seatLayout == null
+                          ? 'incident_location_hint'.tr()
+                          : 'incident_location_note_hint'.tr(),
+                      controller: location,
+                      prefixIcon: const Icon(Icons.location_on_outlined),
+                    ),
+                    SizedBox(height: AppDimens.spacingMedium),
+
+                    // Multi-line notes (CustomTextField is single-line).
+                    TextField(
+                      controller: notes,
+                      minLines: 3,
+                      maxLines: 4,
+                      keyboardType: TextInputType.multiline,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: AppDimens.bodyLarge,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'incident_notes_hint'.tr(),
+                        hintStyle: TextStyle(
+                          color: colors.onSurfaceVariant,
+                          fontSize: AppDimens.bodyMedium,
+                        ),
+                        alignLabelWithHint: true,
+                        filled: true,
+                        fillColor: colors.surface,
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.only(bottom: 40.h),
+                          child: Icon(
+                            Icons.notes_outlined,
+                            color: colors.primary,
+                            size: 20.w,
+                          ),
+                        ),
+                        contentPadding: EdgeInsets.all(AppDimens.spacingMedium),
+                        border: fieldBorder,
+                        enabledBorder: fieldBorder,
+                        focusedBorder: fieldBorder.copyWith(
+                          borderSide: BorderSide(
+                            color: colors.primary,
+                            width: 1.5.w,
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    SizedBox(height: AppDimens.spacingMedium),
+
+                    PhotoEvidenceSection(
+                      photoPaths: entryState.photoPaths,
+                      maxPhotos: ActionEntryViewModel.maxPhotos,
+                      isTakingPhoto: entryState.isTakingPhoto,
+                      enabled: !isSaving,
+                      onAdd: addPhoto,
+                      onRemove: viewModel.removePhoto,
+                    ),
+                    SizedBox(height: AppDimens.spacingLarge),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: isSaving
+                                ? null
+                                : () => submit(thenShare: true),
+                            icon: const Icon(Icons.description_rounded),
+                            label: Text('incident_save_share'.tr()),
+                            style: OutlinedButton.styleFrom(
+                              padding: EdgeInsets.symmetric(vertical: 12.h),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 10.w),
+                        Expanded(
+                          child: PrimaryButton(
+                            label: isSaving
+                                ? 'incident_saving'.tr()
+                                : 'save_record'.tr(),
+                            isLoading: isSaving,
+                            onPressed: () => submit(thenShare: false),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Read-only field that opens the seat map; shows the chosen seat.
+class _SeatField extends StatelessWidget {
+  const _SeatField({required this.seat, this.onTap, this.onClear});
+
+  final String? seat;
+  final VoidCallback? onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
+      borderSide: BorderSide(color: colors.outline, width: 1.w),
+    );
+    final hasSeat = seat != null;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
+      child: InputDecorator(
+        isEmpty: !hasSeat,
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: colors.surface,
+          labelText: 'incident_seat'.tr(),
+          hintText: 'incident_seat_pick'.tr(),
+          prefixIcon: Icon(
+            Icons.event_seat_outlined,
+            color: colors.primary,
+            size: 20.w,
+          ),
+          suffixIcon: hasSeat
+              ? IconButton(
+                  tooltip: 'incident_seat_clear'.tr(),
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: onClear,
+                )
+              : Icon(Icons.grid_view_rounded, color: colors.onSurfaceVariant),
+          border: border,
+          enabledBorder: border,
+        ),
+        child: hasSeat
+            ? Text(
+                seat!,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: colors.primary,
+                ),
+              )
+            : null,
       ),
     );
   }

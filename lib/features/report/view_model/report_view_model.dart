@@ -4,7 +4,9 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/share/i_share_service.dart';
+import 'package:exam_guard/features/action_log/model/seat_map.dart';
 import 'package:exam_guard/features/report/repository/report_repository.dart';
+import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 
 class ReportState {
@@ -20,6 +22,16 @@ class ReportState {
 class ReportViewModel extends Notifier<ReportState> {
   @override
   ReportState build() => const ReportState();
+
+  /// Incident count and highest severity per seat.
+  Map<String, SeatSummary> seatSummaries(SessionModel session) =>
+      summarizeSeats(session.deviceLogs);
+
+  /// Incidents recorded at [seat], oldest first.
+  List<ActionLogModel> incidentsAtSeat(SessionModel session, String seat) => [
+    for (final l in session.deviceLogs)
+      if (l.seat?.trim().toUpperCase() == seat.toUpperCase()) l,
+  ];
 
   /// [origin] anchors the iPad share popover (global rect of the button).
   Future<void> exportPdf(SessionModel session, {Rect? origin}) async {

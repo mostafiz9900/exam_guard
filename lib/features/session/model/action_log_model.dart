@@ -28,6 +28,8 @@ class ActionLogModel {
     required this.location,
     required this.notes,
     required this.createdAt,
+    this.seat,
+    this.photoPaths = const [],
   });
 
   final String deviceName;
@@ -37,6 +39,12 @@ class ActionLogModel {
   final String location;
   final String notes;
   final DateTime createdAt;
+
+  /// Seat on the room's seat map, e.g. "C4" (row letter + column number).
+  final String? seat;
+
+  /// Evidence photos saved on the device (absolute file paths).
+  final List<String> photoPaths;
 
   // Keys match the map format stored by earlier versions, so existing
   // Hive data still loads.
@@ -48,10 +56,13 @@ class ActionLogModel {
     'location': location,
     'notes': notes,
     'createdAt': createdAt.millisecondsSinceEpoch,
+    'seat': seat,
+    'photoPaths': photoPaths,
   };
 
   factory ActionLogModel.fromJson(Map<String, dynamic> json) {
     final created = json['createdAt'];
+    final photos = json['photoPaths'];
     return ActionLogModel(
       deviceName: json['name'] as String? ?? 'Unknown Device',
       deviceId: json['id'] as String? ?? 'N/A',
@@ -62,6 +73,12 @@ class ActionLogModel {
       createdAt: created is int
           ? DateTime.fromMillisecondsSinceEpoch(created)
           : DateTime.fromMillisecondsSinceEpoch(0),
+      seat: json['seat'] as String?,
+      photoPaths: [
+        if (photos is List)
+          for (final p in photos)
+            if (p is String) p,
+      ],
     );
   }
 }

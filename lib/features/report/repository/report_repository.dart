@@ -7,6 +7,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:exam_guard/core/services/pdf/i_pdf_service.dart';
 import 'package:exam_guard/core/services/share/i_share_service.dart';
 import 'package:exam_guard/core/utils/app_date_format.dart';
+import 'package:exam_guard/features/action_log/model/seat_map.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 
@@ -71,6 +72,70 @@ class ReportRepository {
     return '${logs.length} $noun recorded — ${critical.length} critical';
   }
 
+  /// e.g. "Taken 09:12:03 AM · 5 trusted devices" or "No baseline was taken".
+  static String baselineText(SessionModel session) {
+    final at = session.baselineAt;
+    if (at == null) return 'No baseline was taken';
+    final n = session.trustedDeviceIds.length;
+    return 'Taken ${AppDateFormat.clock(at)} · $n trusted '
+        '${n == 1 ? 'device' : 'devices'}';
+  }
+
+  /// Seat map of the room with seats colored by their highest severity,
+  /// or null when the session has no layout.
+  static PdfGrid? seatGrid(SessionModel session) {
+    if (!session.hasSeatLayout) return null;
+    final rows = session.seatRows!;
+    final cols = session.seatCols!;
+    final cells = <(int, int), PdfGridCell>{};
+    var outside = 0;
+    for (final MapEntry(key: seat, value: summary) in summarizeSeats(
+      session.deviceLogs,
+    ).entries) {
+      final pos = SeatId.parse(seat);
+      if (pos == null || pos.$1 >= rows || pos.$2 >= cols) {
+        outside++;
+        continue;
+      }
+      cells[pos] = PdfGridCell(
+        text: '${summary.count}',
+        color: severityColor(summary.highestSeverity),
+      );
+    }
+    return PdfGrid(
+      rows: rows,
+      columns: cols,
+      rowLabels: [for (var r = 0; r < rows; r++) SeatId.rowLabel(r)],
+      columnLabels: [for (var c = 0; c < cols; c++) SeatId.colLabel(c)],
+      cells: cells,
+      topLabel: 'FRONT — Invigilator desk',
+      legend: [
+        for (final s in LogSeverity.values)
+          PdfLegendItem(_titleCase(s.code), severityColor(s)),
+      ],
+      note:
+          'Number in a seat = incidents recorded there; color = highest '
+          'severity.${outside > 0 ? ' $outside seat(s) outside this layout '
+                    'are listed in the incident log only.' : ''}',
+    );
+  }
+
+  /// Every evidence photo, captioned with time, seat and device.
+  static List<PdfImageItem> evidencePhotos(List<ActionLogModel> logs) => [
+    for (final l in logs)
+      for (var i = 0; i < l.photoPaths.length; i++)
+        PdfImageItem(
+          path: l.photoPaths[i],
+          caption: [
+            AppDateFormat.clock(l.createdAt),
+            if ((l.seat ?? '').trim().isNotEmpty) 'Seat ${l.seat}',
+            _orDash(l.deviceName),
+            if (l.photoPaths.length > 1)
+              'photo ${i + 1} of ${l.photoPaths.length}',
+          ].join(' · '),
+        ),
+  ];
+
   /// Builds the report content. [generatedAt] defaults to now.
   @visibleForTesting
   static PdfTableDocument buildDocument(
@@ -102,6 +167,13 @@ class ReportRepository {
               ? 'In progress'
               : AppDateFormat.fullDateTime(session.endTime!),
         ),
+        PdfMetaItem('Baseline', baselineText(session)),
+        PdfMetaItem(
+          'Seat layout',
+          session.hasSeatLayout
+              ? '${session.seatRows} rows × ${session.seatCols} seats'
+              : 'Not set',
+        ),
       ],
       summaryTitle: 'Summary',
       summaryItems: [
@@ -119,15 +191,18 @@ class ReportRepository {
           : criticalCount > 0
           ? _critical
           : _high,
+      gridTitle: 'Seat map',
+      grid: seatGrid(session),
       tableTitle: 'Incident log',
       tableColumns: const [
         PdfTableColumn('Time', flex: 1.2),
         PdfTableColumn('Severity', flex: 1.15),
         PdfTableColumn('Category', flex: 1.2),
         PdfTableColumn('Device', flex: 1.5),
-        PdfTableColumn('Device ID', flex: 1.8),
-        PdfTableColumn('Location', flex: 1.2),
-        PdfTableColumn('Notes', flex: 2.5),
+        PdfTableColumn('Device ID', flex: 1.7),
+        PdfTableColumn('Seat', flex: 0.7),
+        PdfTableColumn('Location', flex: 1.1),
+        PdfTableColumn('Notes', flex: 2.3),
       ],
       tableRows: [
         for (final l in logs)
@@ -137,6 +212,7 @@ class ReportRepository {
             PdfTableCell(_orDash(l.category)),
             PdfTableCell(_orDash(l.deviceName), bold: true),
             PdfTableCell(_orDash(l.deviceId)),
+            PdfTableCell(_orDash(l.seat ?? ''), bold: true),
             PdfTableCell(_orDash(l.location)),
             PdfTableCell(_orDash(l.notes)),
           ],
@@ -145,6 +221,9 @@ class ReportRepository {
       emptyTableText:
           'The invigilator recorded no device violations between the start '
           'and end of this session.',
+      imagesTitle: 'Evidence photos',
+      images: evidencePhotos(logs),
+      imageMissingText: 'Photo file missing (not included)',
       signatures: [
         PdfSignatureBlock(role: 'Invigilator', name: session.teacherName),
         const PdfSignatureBlock(role: 'Exam Controller'),

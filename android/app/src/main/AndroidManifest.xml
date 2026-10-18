@@ -11,6 +11,17 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Wi-Fi access point scans (phone hotspots). On Android 13+ scan results
+         need NEARBY_WIFI_DEVICES; "neverForLocation" is fine here (unlike
+         BLUETOOTH_SCAN, Wi-Fi results are not filtered — SSID/BSSID are still
+         returned) and lets scans work with Location off. Android 12 and lower
+         use ACCESS_FINE_LOCATION above. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
     <!-- Feature requirement for BLE -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 

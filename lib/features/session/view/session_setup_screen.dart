@@ -9,6 +9,7 @@ import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/custom_text_field.dart';
 import 'package:exam_guard/core/widgets/primary_button.dart';
+import 'package:exam_guard/features/session/view/widgets/seat_layout_fields.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
@@ -22,7 +23,10 @@ class SessionSetupScreen extends HookConsumerWidget {
     final instituteController = useTextEditingController();
     final supervisorController = useTextEditingController();
     final roomController = useTextEditingController();
+    final seatRowsController = useTextEditingController();
+    final seatColsController = useTextEditingController();
     final errorText = useState<String?>(null);
+    final seatErrorText = useState<String?>(null);
     final isSubmitting = useState(false);
 
     final animController = useAnimationController(
@@ -56,10 +60,18 @@ class SessionSetupScreen extends HookConsumerWidget {
 
     Future<void> startSession() async {
       final room = roomController.text.trim();
-      if (room.isEmpty) {
-        errorText.value = 'room_required'.tr();
-        return;
-      }
+      final seats = SeatLayoutInput.parse(
+        seatRowsController.text,
+        seatColsController.text,
+      );
+      errorText.value = room.isEmpty ? 'room_required'.tr() : null;
+      seatErrorText.value = seats.errorKey?.tr(
+        args: {
+          'min': '${SeatLayoutInput.min}',
+          'max': '${SeatLayoutInput.max}',
+        },
+      );
+      if (room.isEmpty || !seats.isValid) return;
       isSubmitting.value = true;
       try {
         await ref
@@ -68,6 +80,8 @@ class SessionSetupScreen extends HookConsumerWidget {
               instituteName: instituteController.text.trim(),
               teacherName: supervisorController.text.trim(),
               roomNumber: room,
+              seatRows: seats.rows,
+              seatCols: seats.cols,
             );
         if (context.mounted) context.goTo(AppRoute.dashboard);
       } catch (_) {
@@ -228,12 +242,18 @@ class SessionSetupScreen extends HookConsumerWidget {
                                   CustomTextField(
                                     hintText: 'supervisor_hint'.tr(),
                                     controller: supervisorController,
-                                    textInputAction: TextInputAction.done,
+                                    textInputAction: TextInputAction.next,
                                     prefixIcon: Icon(
                                       Icons.badge,
                                       color: colors.onSurfaceVariant,
                                     ),
-                                    onSubmitted: (_) => startSession(),
+                                  ),
+                                  SizedBox(height: AppDimens.spacingLarge),
+                                  SeatLayoutFields(
+                                    rowsController: seatRowsController,
+                                    colsController: seatColsController,
+                                    errorText: seatErrorText.value,
+                                    onChanged: () => seatErrorText.value = null,
                                   ),
                                   SizedBox(height: AppDimens.spacingExtraLarge),
                                   SizedBox(
@@ -262,6 +282,19 @@ class SessionSetupScreen extends HookConsumerWidget {
                                       ),
                                     ),
                                   ],
+                                  SizedBox(height: AppDimens.spacingSmall),
+                                  Center(
+                                    child: TextButton.icon(
+                                      onPressed: () =>
+                                          context.pushTo(AppRoute.history),
+                                      icon: const Icon(Icons.history_rounded),
+                                      label: Text(
+                                        'setup_exam_history'.tr(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),

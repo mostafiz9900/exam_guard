@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:exam_guard/core/services/pdf/pdf_service_impl.dart';
 import 'package:exam_guard/features/report/repository/report_repository.dart';
@@ -107,5 +109,121 @@ void main() {
       expect(id, startsWith('EG-'));
       expect(id.length, lessThanOrEqualTo(13));
     });
+  });
+
+  group('seat map, photos and baseline', () {
+    final png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ'
+      'DwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    );
+    late Directory dir;
+
+    setUp(() => dir = Directory.systemTemp.createTempSync('report_test'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    SessionModel withEvidence({required bool filesExist}) {
+      final base = _session(0);
+      String photo(String name) {
+        final path = '${dir.path}/$name';
+        if (filesExist) File(path).writeAsBytesSync(png);
+        return path;
+      }
+
+      ActionLogModel log(
+        String? seat,
+        LogSeverity severity,
+        List<String> photos,
+      ) => ActionLogModel(
+        deviceName: 'AirPods',
+        deviceId: 'AA',
+        category: 'Classic Bluetooth Earpiece',
+        severity: severity,
+        location: '',
+        notes: '',
+        createdAt: base.startTime.add(const Duration(minutes: 5)),
+        seat: seat,
+        photoPaths: photos,
+      );
+
+      return base.copyWith(
+        seatRows: 6,
+        seatCols: 8,
+        baselineAt: base.startTime.add(const Duration(minutes: 2)),
+        trustedDeviceIds: {'X', 'Y', 'Z'},
+        deviceLogs: [
+          log('C4', LogSeverity.low, [photo('1.png'), photo('2.png')]),
+          log('C4', LogSeverity.critical, const []),
+          log('A1', LogSeverity.medium, [photo('3.png')]),
+          log(null, LogSeverity.high, const []),
+          log('Z99', LogSeverity.high, const []),
+        ],
+      );
+    }
+
+    test('document has seat column, seat grid, photos and baseline', () {
+      final doc = ReportRepository.buildDocument(
+        withEvidence(filesExist: true),
+      );
+
+      final seatCol = doc.tableColumns.indexWhere((c) => c.label == 'Seat');
+      expect(seatCol, greaterThanOrEqualTo(0));
+      expect(doc.tableRows.map((r) => r[seatCol].text), [
+        'C4',
+        'C4',
+        'A1',
+        '-',
+        'Z99',
+      ]);
+
+      final grid = doc.grid!;
+      expect((grid.rows, grid.columns), (6, 8));
+      expect(grid.rowLabels.first, 'A');
+      expect(grid.columnLabels.last, '8');
+      expect(grid.cells.keys, unorderedEquals([(2, 3), (0, 0)]));
+      expect(grid.cells[(2, 3)]!.text, '2');
+      expect(
+        grid.cells[(2, 3)]!.color,
+        ReportRepository.severityColor(LogSeverity.critical),
+      );
+      expect(grid.note, contains('outside this layout'));
+
+      expect(doc.images, hasLength(3));
+      expect(doc.images.first.caption, contains('Seat C4'));
+      expect(doc.images.first.caption, contains('AirPods'));
+      expect(doc.images.first.caption, contains('photo 1 of 2'));
+
+      final baseline = doc.metaRows.firstWhere((m) => m.label == 'Baseline');
+      expect(baseline.value, contains('3 trusted devices'));
+    });
+
+    test('no layout → no grid; no baseline is stated', () {
+      final doc = ReportRepository.buildDocument(_session(2));
+      expect(doc.grid, isNull);
+      expect(doc.images, isEmpty);
+      expect(
+        doc.metaRows.firstWhere((m) => m.label == 'Baseline').value,
+        'No baseline was taken',
+      );
+    });
+
+    for (final filesExist in [true, false]) {
+      test('PDF builds with seat map and '
+          '${filesExist ? 'photos' : 'missing photo files'}', () async {
+        final printed = <String>[];
+        final bytes = await build(
+          withEvidence(filesExist: filesExist),
+          printed,
+        );
+        expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+        expect(
+          printed.where((l) => l.contains('Unable to find a font')),
+          isEmpty,
+        );
+        final images = RegExp(r'/Subtype\s*/Image')
+            .allMatches(String.fromCharCodes(bytes))
+            .length;
+        expect(images > 0, filesExist);
+      });
+    }
   });
 }

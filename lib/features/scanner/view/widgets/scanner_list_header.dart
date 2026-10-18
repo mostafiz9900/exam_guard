@@ -5,7 +5,8 @@ import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 
-/// Filter chips, the discovered count and the List / Radar map switch.
+/// Filter chips, the discovered count, the list order (Stable / Nearest
+/// first) and the List / Radar map switch.
 /// Pinned under the app bar while the device list scrolls.
 class ScannerListHeader extends StatelessWidget {
   const ScannerListHeader({
@@ -16,7 +17,17 @@ class ScannerListHeader extends StatelessWidget {
     required this.signalCount,
     required this.isRadarMap,
     required this.onRadarMapChanged,
+    required this.sortMode,
+    required this.onSortModeChanged,
+    this.transportCounts = const {},
   });
+
+  final ScanSortMode sortMode;
+  final ValueChanged<ScanSortMode> onSortModeChanged;
+
+  /// Shown devices per transport; a "BLE 12 · Classic 2 · Wi-Fi 5" line
+  /// appears once anything other than BLE is in the list.
+  final Map<DeviceTransport, int> transportCounts;
 
   final DeviceFilter filter;
   final ValueChanged<DeviceFilter> onFilterChanged;
@@ -90,6 +101,26 @@ class ScannerListHeader extends StatelessWidget {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+                      if ((transportCounts[DeviceTransport.classic] ?? 0) +
+                              (transportCounts[DeviceTransport.wifi] ?? 0) >
+                          0)
+                        Text(
+                          'scan_transport_counts'.tr(
+                            args: {
+                              'ble':
+                                  '${transportCounts[DeviceTransport.ble] ?? 0}',
+                              'classic':
+                                  '${transportCounts[DeviceTransport.classic] ?? 0}',
+                              'wifi':
+                                  '${transportCounts[DeviceTransport.wifi] ?? 0}',
+                            },
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
                       if (signalCount != deviceCount)
                         Text(
                           'scan_signal_summary'.tr(
@@ -107,7 +138,29 @@ class ScannerListHeader extends StatelessWidget {
                     ],
                   ),
                 ),
-                SizedBox(width: 8.w),
+                SizedBox(width: 4.w),
+                PopupMenuButton<ScanSortMode>(
+                  tooltip: 'scan_sort_tooltip'.tr(
+                    args: {'mode': sortMode.labelKey.tr()},
+                  ),
+                  initialValue: sortMode,
+                  onSelected: onSortModeChanged,
+                  icon: Icon(
+                    sortMode == ScanSortMode.stable
+                        ? Icons.low_priority_rounded
+                        : Icons.near_me_rounded,
+                    color: scheme.primary,
+                  ),
+                  itemBuilder: (_) => [
+                    for (final m in ScanSortMode.values)
+                      CheckedPopupMenuItem(
+                        value: m,
+                        checked: m == sortMode,
+                        child: Text(m.labelKey.tr()),
+                      ),
+                  ],
+                ),
+                SizedBox(width: 6.w),
                 SegmentedButton<bool>(
                   showSelectedIcon: false,
                   style: const ButtonStyle(

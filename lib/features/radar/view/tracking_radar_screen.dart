@@ -16,6 +16,7 @@ import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/view/widgets/direction_step_item.dart';
+import 'package:exam_guard/features/radar/view/widgets/proximity_meter_card.dart';
 import 'package:exam_guard/features/radar/view/widgets/radar_painter.dart';
 
 class TrackingRadarScreen extends HookConsumerWidget {
@@ -170,6 +171,23 @@ class TrackingRadarScreen extends HookConsumerWidget {
       if (context.mounted) radarNotifier.setAlertsSuspended(false);
     }
 
+    Future<void> openSeatSweep(ScannedDeviceModel device) async {
+      radarNotifier.setAlertsSuspended(true);
+      await context.pushTo(AppRoute.seatSweep, extra: device);
+      if (context.mounted) radarNotifier.setAlertsSuspended(false);
+    }
+
+    // Shown in the meter instead of the trend while not measuring.
+    final String? meterStatus = isLive
+        ? null
+        : radarState.isLocationOff
+        ? 'radar_location_off_title'.tr()
+        : radarState.errorKey != null
+        ? 'radar_not_measuring'.tr()
+        : radarState.isSignalLost
+        ? 'radar_signal_lost_title'.tr()
+        : 'radar_acquiring_title'.tr();
+
     return Scaffold(
       appBar: AppBar(
         title: Text('tracking_radar'.tr()),
@@ -178,6 +196,15 @@ class TrackingRadarScreen extends HookConsumerWidget {
             icon: Icon(Icons.help_outline_rounded, size: 24.w),
             tooltip: 'radar_guide_title'.tr(),
             onPressed: () => _showDirectionGuideModal(context),
+          ),
+          IconButton(
+            icon: Icon(
+              radarState.isVibrationEnabled
+                  ? Icons.vibration_rounded
+                  : Icons.mobile_off_rounded,
+            ),
+            tooltip: 'radar_vibration_tooltip'.tr(),
+            onPressed: radarNotifier.toggleVibration,
           ),
           IconButton(
             icon: Icon(
@@ -233,6 +260,37 @@ class TrackingRadarScreen extends HookConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // Big hot/cold meter: readable at arm's length.
+                        ProximityMeterCard(
+                          closeness: radarState.closeness,
+                          smoothedRssi: radarState.smoothedRssi,
+                          peakCloseness: radarState.peakCloseness,
+                          peakRssi: radarState.peakRssi,
+                          trend: radarState.trend,
+                          statusText: meterStatus,
+                          onResetPeak: radarNotifier.resetPeak,
+                        ),
+                        SizedBox(height: AppDimens.spacingSmall),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.tips_and_updates_outlined,
+                              size: 18.w,
+                              color: colorScheme.primary,
+                            ),
+                            SizedBox(width: 8.w),
+                            Expanded(
+                              child: Text(
+                                'radar_finder_tips'.tr(),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: secondaryText),
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: AppDimens.spacingMedium),
+
                         // Live Dynamic Direction Guidance Banner
                         Container(
                           padding: EdgeInsets.symmetric(
@@ -485,6 +543,14 @@ class TrackingRadarScreen extends HookConsumerWidget {
                         SizedBox(height: AppDimens.spacingLarge),
 
                         // Action Buttons
+                        if (activeDevice.isBle) ...[
+                          OutlinedButton.icon(
+                            onPressed: () => openSeatSweep(activeDevice),
+                            icon: const Icon(Icons.event_seat_rounded),
+                            label: Text('radar_open_seat_sweep'.tr()),
+                          ),
+                          SizedBox(height: AppDimens.spacingSmall),
+                        ],
                         PrimaryButton(
                           label: 'log_incident'.tr(),
                           onPressed: () => logIncident(activeDevice),

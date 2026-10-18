@@ -1,3 +1,5 @@
+import 'dart:io' show File;
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show Color;
 
@@ -11,15 +13,25 @@ import 'package:exam_guard/core/services/pdf/i_pdf_service.dart';
 /// Loads a bundled asset. Replaceable in tests.
 typedef PdfAssetLoader = Future<ByteData> Function(String key);
 
+/// Reads an image file. Replaceable in tests.
+typedef PdfFileReader = Future<Uint8List> Function(String path);
+
+Future<Uint8List> _readFileBytes(String path) => File(path).readAsBytes();
+
 class PdfServiceImpl implements IPdfService {
-  PdfServiceImpl({AppLogger? logger, PdfAssetLoader? loadAsset})
-    : _logger = logger, // ignore: prefer_initializing_formals
-      _loadAsset = loadAsset ?? rootBundle.load;
+  PdfServiceImpl({
+    AppLogger? logger,
+    PdfAssetLoader? loadAsset,
+    PdfFileReader? readFile,
+  }) : _logger = logger, // ignore: prefer_initializing_formals
+       _loadAsset = loadAsset ?? rootBundle.load,
+       _readFile = readFile ?? _readFileBytes;
 
   static const _fontDir = 'assets/fonts';
 
   final AppLogger? _logger;
   final PdfAssetLoader _loadAsset;
+  final PdfFileReader _readFile;
 
   /// Loaded once and reused for every report.
   Future<_PdfFonts>? _fonts;
@@ -32,7 +44,8 @@ class PdfServiceImpl implements IPdfService {
   Future<Uint8List> buildTableDocument(PdfTableDocument document) async {
     try {
       final fonts = await _loadFonts();
-      return await _build(document, fonts);
+      final images = await _loadImages(document.images);
+      return await _build(document, fonts, images);
     } catch (e, st) {
       _logger?.error('Building PDF document failed', e, st);
       throw PdfGenerationException(e);
@@ -51,7 +64,28 @@ class PdfServiceImpl implements IPdfService {
     return loading;
   }
 
-  Future<Uint8List> _build(PdfTableDocument document, _PdfFonts fonts) {
+  /// Decodes every image; unreadable or missing ones are kept as captions
+  /// only so the document can list them.
+  Future<List<_LoadedImage>> _loadImages(List<PdfImageItem> items) async {
+    final loaded = <_LoadedImage>[];
+    for (final item in items) {
+      pw.MemoryImage? image;
+      try {
+        final bytes = item.bytes ?? await _readFile(item.path!);
+        image = pw.MemoryImage(bytes);
+      } catch (e) {
+        _logger?.warning('PDF image skipped (${item.path ?? 'bytes'}): $e');
+      }
+      loaded.add(_LoadedImage(image, item.caption));
+    }
+    return loaded;
+  }
+
+  Future<Uint8List> _build(
+    PdfTableDocument document,
+    _PdfFonts fonts,
+    List<_LoadedImage> images,
+  ) {
     final doc = pw.Document(title: document.title, creator: 'ExamGuard');
     final ui = _Ui(fonts, _text);
 
@@ -84,6 +118,11 @@ class PdfServiceImpl implements IPdfService {
             if (document.summaryText != null)
               _verdict(document.summaryText!, document.summaryColor, ui),
           ],
+          if (document.grid != null) ...[
+            if (document.gridTitle != null)
+              _sectionTitle(document.gridTitle!, ui),
+            ..._grid(document.grid!, ui),
+          ],
           if (document.tableTitle != null)
             _sectionTitle(document.tableTitle!, ui),
           if (document.tableRows.isNotEmpty)
@@ -91,6 +130,11 @@ class PdfServiceImpl implements IPdfService {
           else if (document.emptyTableText != null ||
               document.emptyTableTitle != null)
             _emptyState(document, ui),
+          if (images.isNotEmpty) ...[
+            if (document.imagesTitle != null)
+              _sectionTitle(document.imagesTitle!, ui),
+            ..._images(images, document.imageMissingText, ui),
+          ],
           if (document.signatures.isNotEmpty)
             _signatures(document.signatures, ui),
         ],
@@ -383,6 +427,194 @@ class PdfServiceImpl implements IPdfService {
     );
   }
 
+  /// Usable width of an A4 page with this document's margins.
+  static const _contentWidth = 595.28 - 72;
+
+  List<pw.Widget> _grid(PdfGrid grid, _Ui ui) {
+    if (grid.rows <= 0 || grid.columns <= 0) return const [];
+    const labelWidth = 18.0;
+    final cellWidth = math.min(
+      40.0,
+      (_contentWidth - labelWidth) / grid.columns,
+    );
+    final cellHeight = cellWidth.clamp(12.0, 28.0);
+    final fontSize = (cellWidth * 0.32).clamp(5.0, 8.5);
+    final gridWidth = labelWidth + cellWidth * grid.columns;
+
+    String label(List<String> labels, int i) =>
+        i < labels.length ? labels[i] : '';
+
+    pw.Widget box(int r, int c) {
+      final cell = grid.cells[(r, c)];
+      final color = cell?.color == null ? null : _pdfColor(cell!.color!);
+      return pw.Container(
+        width: cellWidth,
+        height: cellHeight,
+        padding: const pw.EdgeInsets.all(1.2),
+        child: pw.Container(
+          alignment: pw.Alignment.center,
+          decoration: pw.BoxDecoration(
+            color: color == null ? _zebra : _tint(color, 0.22),
+            border: pw.Border.all(
+              color: color ?? _line,
+              width: color == null ? 0.4 : 0.9,
+            ),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(2)),
+          ),
+          child: (cell?.text ?? '').isEmpty
+              ? null
+              : ui.text(
+                  cell!.text,
+                  bold: true,
+                  fontSize: fontSize,
+                  color: color ?? _ink,
+                ),
+        ),
+      );
+    }
+
+    pw.Widget axis(String text, double width, double height) => pw.Container(
+      width: width,
+      height: height,
+      alignment: pw.Alignment.center,
+      child: ui.text(text, fontSize: fontSize, color: _muted),
+    );
+
+    return [
+      if (grid.topLabel != null)
+        pw.Container(
+          width: gridWidth,
+          margin: const pw.EdgeInsets.only(bottom: 3),
+          padding: const pw.EdgeInsets.only(left: labelWidth),
+          child: pw.Container(
+            alignment: pw.Alignment.center,
+            padding: const pw.EdgeInsets.symmetric(vertical: 3),
+            decoration: const pw.BoxDecoration(
+              color: _shade,
+              border: pw.Border(
+                bottom: pw.BorderSide(color: _brand, width: 1.2),
+              ),
+            ),
+            child: ui.text(
+              grid.topLabel!,
+              bold: true,
+              fontSize: 7.5,
+              color: _brand,
+            ),
+          ),
+        ),
+      pw.Row(
+        children: [
+          pw.SizedBox(width: labelWidth),
+          for (var c = 0; c < grid.columns; c++)
+            axis(label(grid.columnLabels, c), cellWidth, 10),
+        ],
+      ),
+      // One widget per row so tall grids can continue on the next page.
+      for (var r = 0; r < grid.rows; r++)
+        pw.Row(
+          children: [
+            axis(label(grid.rowLabels, r), labelWidth, cellHeight),
+            for (var c = 0; c < grid.columns; c++) box(r, c),
+          ],
+        ),
+      if (grid.legend.isNotEmpty)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 6),
+          child: pw.Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            children: [
+              for (final item in grid.legend)
+                pw.Row(
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: [
+                    pw.Container(
+                      width: 8,
+                      height: 8,
+                      decoration: pw.BoxDecoration(
+                        color: _tint(_pdfColor(item.color), 0.22),
+                        border: pw.Border.all(
+                          color: _pdfColor(item.color),
+                          width: 0.8,
+                        ),
+                      ),
+                    ),
+                    pw.SizedBox(width: 3),
+                    ui.text(item.label, fontSize: 7.5, color: _ink),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      if (grid.note != null)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 3),
+          child: ui.text(grid.note!, fontSize: 7.5, color: _muted),
+        ),
+    ];
+  }
+
+  List<pw.Widget> _images(
+    List<_LoadedImage> images,
+    String missingText,
+    _Ui ui,
+  ) {
+    const gap = 10.0;
+    const width = (_contentWidth - gap) / 2;
+    const height = 190.0;
+
+    pw.Widget tile(_LoadedImage item) => pw.Container(
+      width: width,
+      padding: const pw.EdgeInsets.all(4),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: _line, width: 0.5),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Container(
+            height: height,
+            width: double.infinity,
+            color: _zebra,
+            alignment: pw.Alignment.center,
+            child: pw.Image(item.image!, fit: pw.BoxFit.contain),
+          ),
+          pw.SizedBox(height: 3),
+          ui.text(item.caption, fontSize: 7.5, color: _ink),
+        ],
+      ),
+    );
+
+    final available = images.where((i) => i.image != null).toList();
+    final missing = images.where((i) => i.image == null).toList();
+    return [
+      for (var i = 0; i < available.length; i += 2)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: gap),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              tile(available[i]),
+              if (i + 1 < available.length) ...[
+                pw.SizedBox(width: gap),
+                tile(available[i + 1]),
+              ],
+            ],
+          ),
+        ),
+      for (final m in missing)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 2),
+          child: ui.text(
+            '$missingText: ${m.caption}',
+            fontSize: 7.5,
+            color: _muted,
+          ),
+        ),
+    ];
+  }
+
   pw.Widget _emptyState(PdfTableDocument document, _Ui ui) {
     return pw.Container(
       width: double.infinity,
@@ -552,6 +784,14 @@ class _Ui {
     color: color,
     align: align,
   );
+}
+
+/// An image ready to embed, or only its caption when it could not be read.
+class _LoadedImage {
+  const _LoadedImage(this.image, this.caption);
+
+  final pw.MemoryImage? image;
+  final String caption;
 }
 
 class _PdfFonts {

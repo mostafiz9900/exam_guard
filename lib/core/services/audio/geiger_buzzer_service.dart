@@ -10,6 +10,7 @@ class GeigerBuzzerService {
   static final GeigerBuzzerService instance = GeigerBuzzerService._();
 
   Timer? _beepTimer;
+  final List<Timer> _alertTimers = [];
   Duration _interval = const Duration(seconds: 1);
   bool _isEnabled = true;
 
@@ -54,14 +55,49 @@ class GeigerBuzzerService {
     _beepTimer = Timer(_interval, _beep);
   }
 
+  /// Stops the Geiger loop. One-shot alerts ([playAlert]) are separate and
+  /// stopped with [stopAlert].
   void stopBuzzer() {
     _beepTimer?.cancel();
     _beepTimer = null;
   }
+
+  /// A short burst of [clicks] clicks, independent of the Geiger loop, so a
+  /// screen can sound an alert without taking over (or stopping) the loop
+  /// another screen runs. Restarting an alert replaces the previous burst.
+  void playAlert({
+    int clicks = 4,
+    Duration gap = const Duration(milliseconds: 110),
+  }) {
+    if (!_isEnabled || clicks <= 0) return;
+    stopAlert();
+    SystemSound.play(SystemSoundType.click);
+    for (var i = 1; i < clicks; i++) {
+      _alertTimers.add(
+        Timer(gap * i, () {
+          if (_isEnabled) SystemSound.play(SystemSoundType.click);
+        }),
+      );
+    }
+  }
+
+  /// Cancels the remaining clicks of a [playAlert] burst; the Geiger loop
+  /// is left alone.
+  void stopAlert() {
+    for (final timer in _alertTimers) {
+      timer.cancel();
+    }
+    _alertTimers.clear();
+  }
+
+  bool get isAlertPlaying => _alertTimers.any((t) => t.isActive);
 }
 
 final geigerBuzzerProvider = Provider<GeigerBuzzerService>((ref) {
   final buzzer = GeigerBuzzerService.instance;
-  ref.onDispose(buzzer.stopBuzzer);
+  ref.onDispose(() {
+    buzzer.stopBuzzer();
+    buzzer.stopAlert();
+  });
   return buzzer;
 });

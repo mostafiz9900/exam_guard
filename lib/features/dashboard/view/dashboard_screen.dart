@@ -20,29 +20,12 @@ import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/live_stat_badge.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/dashboard_module_card.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/dashboard_scan_status.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/live_threat_tile.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/new_device_alert_banner.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/room_baseline_card.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/mini_sweep_painter.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/signal_strength.dart';
-
-/// Scanner status as the dashboard shows it.
-enum _ScanStatus { live, bluetoothOff, locationOff, failed, stopped }
-
-/// Only blocking problems count: [ScannerState.errorMessage] is a blocking
-/// scan problem, while transient notices ([ScannerState.noticeKey]) are not
-/// failures and never turn the chip into "SCAN FAILED".
-_ScanStatus _scanStatusOf(ScannerState s) {
-  if (s.isBluetoothOff) return _ScanStatus.bluetoothOff;
-  if (s.isLocationOff) return _ScanStatus.locationOff;
-  if (s.errorMessage != null) return _ScanStatus.failed;
-  if (s.isScanning) return _ScanStatus.live;
-  return _ScanStatus.stopped;
-}
-
-/// Amber warning that stays readable on light and dark surfaces.
-Color _warningColor(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-    ? Colors.amber.shade300
-    : Colors.orange.shade800;
 
 /// Ordered magnetic levels: critical and above red, elevated orange.
 Color _magneticColor(MagneticHazardLevel level) {
@@ -65,8 +48,23 @@ class DashboardScreen extends HookConsumerWidget {
     // scan animates the radar and shows the active scanner icon.
     final isScanning = ref.watch(
       scannerViewModelProvider.select(
-        (s) => _scanStatusOf(s) == _ScanStatus.live,
+        (s) => dashboardScanStatusOf(s) == DashboardScanStatus.live,
       ),
+    );
+
+    // A new device appeared since the baseline: buzz and beep once per alert.
+    ref.listen(scannerViewModelProvider.select((s) => s.alertSeq), (
+      previous,
+      next,
+    ) {
+      if (previous != null && next > previous) {
+        HapticFeedback.heavyImpact();
+        SystemSound.play(SystemSoundType.alert);
+      }
+    });
+
+    final hasBaseline = ref.watch(
+      scannerViewModelProvider.select((s) => s.hasBaseline),
     );
 
     final room = session?.roomNumber.isNotEmpty == true
@@ -302,6 +300,11 @@ class DashboardScreen extends HookConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        const NewDeviceAlertBanner(),
+                        if (!hasBaseline) ...[
+                          const RoomBaselineCard(),
+                          SizedBox(height: AppDimens.spacingMedium),
+                        ],
                         // Live Security Status HUD Hero Card
                         Card(
                           elevation: 3,
@@ -471,6 +474,10 @@ class DashboardScreen extends HookConsumerWidget {
                             ),
                           ),
                         ),
+                        if (hasBaseline) ...[
+                          SizedBox(height: AppDimens.spacingSmall),
+                          const RoomBaselineCard(),
+                        ],
                         SizedBox(height: AppDimens.spacingLarge),
 
                         Text(
@@ -662,19 +669,24 @@ class _ScanStatusChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(scannerViewModelProvider.select(_scanStatusOf));
+    final status = ref.watch(
+      scannerViewModelProvider.select(dashboardScanStatusOf),
+    );
     final error = Theme.of(context).colorScheme.error;
     final (label, color) = switch (status) {
-      _ScanStatus.live => ('status_monitoring_live'.tr(), AppColors.success),
-      _ScanStatus.bluetoothOff => ('status_bluetooth_off'.tr(), error),
-      _ScanStatus.locationOff => (
-        'dash_status_location_off'.tr(),
-        _warningColor(context),
+      DashboardScanStatus.live => (
+        'status_monitoring_live'.tr(),
+        AppColors.success,
       ),
-      _ScanStatus.failed => ('status_scan_failed'.tr(), error),
-      _ScanStatus.stopped => ('status_scan_stopped'.tr(), error),
+      DashboardScanStatus.bluetoothOff => ('status_bluetooth_off'.tr(), error),
+      DashboardScanStatus.locationOff => (
+        'dash_status_location_off'.tr(),
+        dashboardWarningColor(context),
+      ),
+      DashboardScanStatus.failed => ('status_scan_failed'.tr(), error),
+      DashboardScanStatus.stopped => ('status_scan_stopped'.tr(), error),
     };
-    final isLive = status == _ScanStatus.live;
+    final isLive = status == DashboardScanStatus.live;
 
     final chip = Container(
       padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
@@ -706,7 +718,7 @@ class _ScanStatusChip extends ConsumerWidget {
           if (!isLive) ...[
             SizedBox(width: 2.w),
             Icon(
-              status == _ScanStatus.locationOff
+              status == DashboardScanStatus.locationOff
                   ? Icons.location_on_rounded
                   : Icons.chevron_right_rounded,
               size: 12.w,
@@ -719,12 +731,12 @@ class _ScanStatusChip extends ConsumerWidget {
 
     if (isLive) return chip;
     return Tooltip(
-      message: status == _ScanStatus.locationOff
+      message: status == DashboardScanStatus.locationOff
           ? 'dash_turn_on_location'.tr()
           : 'open_scanner'.tr(),
       child: InkWell(
         borderRadius: BorderRadius.circular(10.r),
-        onTap: status == _ScanStatus.locationOff
+        onTap: status == DashboardScanStatus.locationOff
             ? ref.read(scannerViewModelProvider.notifier).openLocationSettings
             : () => context.pushTo(AppRoute.scanner),
         child: chip,
@@ -778,7 +790,9 @@ class _LiveDeviceFeed extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(scannerViewModelProvider.select(_scanStatusOf));
+    final status = ref.watch(
+      scannerViewModelProvider.select(dashboardScanStatusOf),
+    );
     final devices = ref.watch(
       scannerViewModelProvider.select((s) => s.activeDevices),
     );
@@ -798,36 +812,36 @@ class _LiveDeviceFeed extends ConsumerWidget {
       );
     }
 
-    final warning = _warningColor(context);
+    final warning = dashboardWarningColor(context);
     final (icon, message, isProblem) = switch (status) {
-      _ScanStatus.live => (
+      DashboardScanStatus.live => (
         Icons.bluetooth_searching_rounded,
         'scanning'.tr(),
         false,
       ),
-      _ScanStatus.bluetoothOff => (
+      DashboardScanStatus.bluetoothOff => (
         Icons.bluetooth_disabled_rounded,
         'feed_bluetooth_off'.tr(),
         true,
       ),
-      _ScanStatus.locationOff => (
+      DashboardScanStatus.locationOff => (
         Icons.location_off_rounded,
         'dash_feed_location_off'.tr(),
         true,
       ),
-      _ScanStatus.failed => (
+      DashboardScanStatus.failed => (
         Icons.error_outline_rounded,
         'scan_unavailable'.tr(),
         true,
       ),
-      _ScanStatus.stopped => (
+      DashboardScanStatus.stopped => (
         Icons.pause_circle_outline_rounded,
         'feed_scan_stopped'.tr(),
         true,
       ),
     };
 
-    final isLocationOff = status == _ScanStatus.locationOff;
+    final isLocationOff = status == DashboardScanStatus.locationOff;
     final iconColor = isLocationOff
         ? warning
         : (isProblem ? colors.error : colors.outline);

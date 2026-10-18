@@ -1,5 +1,9 @@
 import 'package:meta/meta.dart';
 
+/// How a device was found. Only BLE gives live, continuous signal updates;
+/// classic Bluetooth and Wi-Fi results arrive every few seconds.
+enum DeviceTransport { ble, classic, wifi }
+
 @immutable
 class ScannedDeviceModel {
   final String id;
@@ -16,6 +20,28 @@ class ScannedDeviceModel {
   final bool isConnecting;
   final int? batteryLevel;
   final String? fullGattName;
+  final DeviceTransport transport;
+
+  /// Classic Bluetooth device class says headset / hands-free / headphones:
+  /// the profile of the classic "spy" earpieces sold for exam cheating.
+  final bool isHighSuspicion;
+
+  bool get isBle => transport == DeviceTransport.ble;
+
+  /// The radio address: the BLE/classic MAC, or the Wi-Fi BSSID (the [id]
+  /// of a Wi-Fi network carries a `wifi:` prefix so it never clashes with a
+  /// Bluetooth address).
+  String get address =>
+      id.startsWith(wifiIdPrefix) ? id.substring(wifiIdPrefix.length) : id;
+
+  /// Prefix of [id] for Wi-Fi access points.
+  static const String wifiIdPrefix = 'wifi:';
+
+  /// Manufacturer of a classic Bluetooth device whose vendor is unknown.
+  static const String genericBluetoothManufacturer = 'Generic Bluetooth';
+
+  /// Manufacturer value of every Wi-Fi access point.
+  static const String wifiManufacturer = 'Wi-Fi';
 
   const ScannedDeviceModel({
     required this.id,
@@ -32,6 +58,8 @@ class ScannedDeviceModel {
     this.isConnecting = false,
     this.batteryLevel,
     this.fullGattName,
+    this.transport = DeviceTransport.ble,
+    this.isHighSuspicion = false,
   });
 
   /// Advertised (or GATT) name, otherwise a label built from what the
@@ -42,6 +70,7 @@ class ScannedDeviceModel {
     if (name.trim().isNotEmpty) return name.trim();
 
     final suffix = id.length >= 5 ? id.substring(id.length - 5) : id;
+    if (transport == DeviceTransport.wifi) return 'Hidden Wi-Fi ($suffix)';
     if (manufacturer.contains('Apple')) {
       return deviceType.contains('Audio')
           ? 'AirPods / Beats ($suffix)'
@@ -51,10 +80,13 @@ class ScannedDeviceModel {
     if (manufacturer.contains('Espressif')) return 'ESP32 Module ($suffix)';
     if (deviceType.contains('Audio')) return 'Wireless Earpiece ($suffix)';
     if (deviceType.contains('Wearable')) return 'Smartband / Watch ($suffix)';
-    if (manufacturer != 'Generic BLE Hardware') {
+    if (manufacturer != 'Generic BLE Hardware' &&
+        manufacturer != genericBluetoothManufacturer) {
       return '$manufacturer ($suffix)';
     }
-    return 'Hidden BLE Device ($suffix)';
+    return transport == DeviceTransport.classic
+        ? 'Bluetooth Device ($suffix)'
+        : 'Hidden BLE Device ($suffix)';
   }
 
   /// True when this device is advertising under a name.
@@ -75,6 +107,8 @@ class ScannedDeviceModel {
     bool? isConnecting,
     int? batteryLevel,
     String? fullGattName,
+    DeviceTransport? transport,
+    bool? isHighSuspicion,
   }) {
     return ScannedDeviceModel(
       id: id ?? this.id,
@@ -91,6 +125,8 @@ class ScannedDeviceModel {
       isConnecting: isConnecting ?? this.isConnecting,
       batteryLevel: batteryLevel ?? this.batteryLevel,
       fullGattName: fullGattName ?? this.fullGattName,
+      transport: transport ?? this.transport,
+      isHighSuspicion: isHighSuspicion ?? this.isHighSuspicion,
     );
   }
 

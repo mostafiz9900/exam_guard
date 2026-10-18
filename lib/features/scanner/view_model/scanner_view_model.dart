@@ -5,14 +5,30 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
+import 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart';
+import 'package:exam_guard/features/scanner/model/new_device_alert.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_group.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/repository/scanner_repository.dart';
+import 'package:exam_guard/features/scanner/repository/wireless_classifier.dart';
 import 'package:exam_guard/features/scanner/view_model/device_filter.dart';
 import 'package:exam_guard/features/scanner/view_model/device_grouping.dart';
+import 'package:exam_guard/features/scanner/view_model/list_order.dart';
+import 'package:exam_guard/features/scanner/view_model/signal_smoothing.dart';
+import 'package:exam_guard/features/session/model/session_model.dart';
+import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 
+export 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart'
+    show WifiScanProblem;
+export 'package:exam_guard/features/scanner/model/new_device_alert.dart';
 export 'package:exam_guard/features/scanner/model/scanned_device_group.dart';
+export 'package:exam_guard/features/scanner/model/scanned_device_model.dart'
+    show DeviceTransport;
 export 'package:exam_guard/features/scanner/view_model/device_filter.dart';
+export 'package:exam_guard/features/scanner/view_model/list_order.dart'
+    show ScanSortMode;
+export 'package:exam_guard/features/scanner/view_model/signal_smoothing.dart'
+    show ProximityBand;
 
 enum RoomSizePreset {
   small('scan_room_small', -75),
@@ -52,6 +68,7 @@ class ScannerState {
   ScannerState({
     this.isScanning = false,
     this.devices = const [],
+    this._groups,
     this.isRoomBoundaryMode = false,
     this.roomSizePreset = RoomSizePreset.medium,
     this.isBluetoothOff = false,
@@ -61,14 +78,38 @@ class ScannerState {
     this.noticeKey,
     this.noticeArgs = const {},
     this.noticeId = 0,
+    this.alerts = const [],
+    this.alertSeq = 0,
+    this.trustedIds = const {},
+    this.baselineAt,
+    this.wifiProblem,
+    this.sortMode = ScanSortMode.stable,
+    this.staleIds = const {},
+    this.bands = const {},
+    this.asOf,
+    this.isSelecting = false,
+    this.selectedIds = const {},
+    this.hasSeatLayout = false,
   });
+
+  /// Most devices the walk finder follows at once.
+  static const int maxWalkTargets = 5;
+
+  /// Devices picked by "Walk & find strongest untrusted".
+  static const int strongestPickCount = 3;
 
   /// True while the scan owner is registered. It stays true while
   /// [isLocationOff]; the scan then resumes by itself.
   final bool isScanning;
 
-  /// Every address heard recently (one entry per BLE address).
+  /// Every address heard recently (one entry per address), newest first.
+  /// BLE [ScannedDeviceModel.rssi] is smoothed (see `RssiSmoother`).
   final List<ScannedDeviceModel> devices;
+
+  /// Groups in display order, as published by the view model (sticky
+  /// grouping, stable or nearest order). Null: grouped from [devices].
+  final List<ScannedDeviceGroup>? _groups;
+
   final bool isRoomBoundaryMode;
   final RoomSizePreset roomSizePreset;
   final bool isBluetoothOff;
@@ -95,13 +136,126 @@ class ScannerState {
   /// still be told apart from the previous one.
   final int noticeId;
 
+  /// New-device alerts raised since the baseline, newest first. Removed when
+  /// the device is trusted.
+  final List<NewDeviceAlert> alerts;
+
+  /// Increases with every new alert (e.g. to vibrate once per alert).
+  final int alertSeq;
+
+  /// Device ids marked as belonging to the room or the invigilator (from
+  /// the running exam session).
+  final Set<String> trustedIds;
+
+  /// When the empty-room baseline was taken, or null.
+  final DateTime? baselineAt;
+
+  /// Why Wi-Fi hotspot detection isn't working, or null when it is.
+  /// [WifiScanProblem.unsupported] (iOS) is expected and not worth showing.
+  final WifiScanProblem? wifiProblem;
+
+  /// List order chosen for this session.
+  final ScanSortMode sortMode;
+
+  /// Devices silent for a while: still listed (muted, "last seen Xs ago")
+  /// until they are removed.
+  final Set<String> staleIds;
+
+  /// Proximity band per device id, with hysteresis.
+  final Map<String, ProximityBand> bands;
+
+  /// When this state was published (for "last seen Xs ago").
+  final DateTime? asOf;
+
+  /// Multi-select mode for "Walk & find".
+  final bool isSelecting;
+
+  /// Device ids picked for "Walk & find" (at most [maxWalkTargets]).
+  final Set<String> selectedIds;
+
+  /// The running exam has a seat layout, so "Seat sweep" is possible.
+  final bool hasSeatLayout;
+
+  bool get hasBaseline => baselineAt != null;
+
+  int get unacknowledgedAlertCount =>
+      alerts.where((a) => !a.acknowledged).length;
+
+  bool isTrusted(String deviceId) => trustedIds.contains(deviceId);
+
+  /// A group is trusted when any of its addresses is.
+  bool isGroupTrusted(ScannedDeviceGroup group) =>
+      group.members.any((m) => trustedIds.contains(m.id));
+
+  /// True when [group] has an alert the invigilator hasn't seen yet.
+  bool hasUnacknowledgedAlert(ScannedDeviceGroup group) => alerts.any(
+    (a) => !a.acknowledged && group.members.any((m) => m.id == a.deviceId),
+  );
+
+  bool isStale(String deviceId) => staleIds.contains(deviceId);
+
+  /// Every address of [group] has gone quiet.
+  bool isGroupStale(ScannedDeviceGroup group) =>
+      group.members.every((m) => staleIds.contains(m.id));
+
+  /// Whole seconds since [device] was last heard.
+  int secondsSinceSeen(ScannedDeviceModel device) {
+    final s = (asOf ?? DateTime.now()).difference(device.lastSeen).inSeconds;
+    return s < 0 ? 0 : s;
+  }
+
+  /// Proximity of [device] (from its smoothed signal, with hysteresis).
+  ProximityBand bandOf(ScannedDeviceModel device) =>
+      bands[device.id] ?? ProximityBand.fromRssi(device.rssi);
+
+  bool isGroupSelected(ScannedDeviceGroup group) =>
+      group.members.any((m) => selectedIds.contains(m.id));
+
+  /// Selected devices in list order.
+  List<ScannedDeviceModel> get selectedDevices => [
+    for (final g in groups)
+      for (final m in g.members)
+        if (selectedIds.contains(m.id)) m,
+  ];
+
+  /// "Seat sweep" works for a live BLE signal in an exam with a seat map.
+  bool canSeatSweep(ScannedDeviceModel device) => hasSeatLayout && device.isBle;
+
+  /// The [count] strongest untrusted BLE devices still being heard (the
+  /// strongest address of each group).
+  List<ScannedDeviceModel> strongestUntrusted([
+    int count = strongestPickCount,
+  ]) {
+    final candidates = [
+      for (final g in activeGroups)
+        if (g.primary.isBle && !isGroupTrusted(g) && !isGroupStale(g))
+          g.members
+              .where((m) => !staleIds.contains(m.id))
+              .reduce((a, b) => b.rssi > a.rssi ? b : a),
+    ]..sort((a, b) => b.rssi.compareTo(a.rssi));
+    return candidates.take(count).toList();
+  }
+
+  /// Number of [groups] per transport (of each group's primary).
+  static Map<DeviceTransport, int> countByTransport(
+    Iterable<ScannedDeviceGroup> groups,
+  ) {
+    final counts = {for (final t in DeviceTransport.values) t: 0};
+    for (final g in groups) {
+      counts[g.primary.transport] = counts[g.primary.transport]! + 1;
+    }
+    return counts;
+  }
+
   /// Devices left after the room boundary filter (one per address).
   late final List<ScannedDeviceModel> activeDevices = isRoomBoundaryMode
       ? devices.where((d) => d.rssi >= roomSizePreset.rssiThreshold).toList()
       : devices;
 
-  /// [devices] with addresses that likely belong to one device grouped.
-  late final List<ScannedDeviceGroup> groups = groupLikelySameDevices(devices);
+  /// [devices] with addresses that likely belong to one device grouped, in
+  /// display order.
+  late final List<ScannedDeviceGroup> groups =
+      _groups ?? groupLikelySameDevices(devices);
 
   /// [groups] after the room boundary filter; members outside the
   /// boundary are left out of each group.
@@ -121,10 +275,13 @@ class ScannerState {
     return devices.where((d) => d.isConnected).toList();
   }
 
-  /// Groups shown for [filter]; a group is matched on its primary.
+  /// Groups shown for [filter], in display order; a group is matched on
+  /// its primary. "Near me" leaves out devices that went quiet.
   List<ScannedDeviceGroup> visibleGroups(DeviceFilter filter) => [
     for (final g in activeGroups)
-      if (filter.matches(g.primary)) g,
+      if (filter.matches(g.primary) &&
+          !(filter == DeviceFilter.nearMe && isGroupStale(g)))
+        g,
   ];
 
   /// Why nothing is shown for [filter], or null when something is.
@@ -142,9 +299,11 @@ class ScannerState {
     return ScannerEmptyReason.filteredOut;
   }
 
+  /// Passing [devices] without [groups] regroups from scratch.
   ScannerState copyWith({
     bool? isScanning,
     List<ScannedDeviceModel>? devices,
+    List<ScannedDeviceGroup>? groups,
     bool? isRoomBoundaryMode,
     RoomSizePreset? roomSizePreset,
     bool? isBluetoothOff,
@@ -155,10 +314,25 @@ class ScannerState {
     String? noticeKey,
     Map<String, String>? noticeArgs,
     int? noticeId,
+    List<NewDeviceAlert>? alerts,
+    int? alertSeq,
+    Set<String>? trustedIds,
+    DateTime? baselineAt,
+    bool clearBaseline = false,
+    WifiScanProblem? wifiProblem,
+    bool clearWifiProblem = false,
+    ScanSortMode? sortMode,
+    Set<String>? staleIds,
+    Map<String, ProximityBand>? bands,
+    DateTime? asOf,
+    bool? isSelecting,
+    Set<String>? selectedIds,
+    bool? hasSeatLayout,
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
       devices: devices ?? this.devices,
+      groups: groups ?? (devices != null ? null : _groups),
       isRoomBoundaryMode: isRoomBoundaryMode ?? this.isRoomBoundaryMode,
       roomSizePreset: roomSizePreset ?? this.roomSizePreset,
       isBluetoothOff: isBluetoothOff ?? this.isBluetoothOff,
@@ -171,36 +345,111 @@ class ScannerState {
       noticeArgs:
           noticeArgs ?? (noticeKey != null ? const {} : this.noticeArgs),
       noticeId: noticeId ?? this.noticeId,
+      alerts: alerts ?? this.alerts,
+      alertSeq: alertSeq ?? this.alertSeq,
+      trustedIds: trustedIds ?? this.trustedIds,
+      baselineAt: clearBaseline ? null : (baselineAt ?? this.baselineAt),
+      wifiProblem: clearWifiProblem ? null : (wifiProblem ?? this.wifiProblem),
+      sortMode: sortMode ?? this.sortMode,
+      staleIds: staleIds ?? this.staleIds,
+      bands: bands ?? this.bands,
+      asOf: asOf ?? this.asOf,
+      isSelecting: isSelecting ?? this.isSelecting,
+      selectedIds: selectedIds ?? this.selectedIds,
+      hasSeatLayout: hasSeatLayout ?? this.hasSeatLayout,
     );
   }
 }
 
-/// Live BLE device discovery. Scans continuously while active; every
-/// advertisement updates the list immediately.
+/// Current time for the scanner (overridden in tests).
+final scannerClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
+/// Live device discovery: BLE advertisements (continuous), classic
+/// Bluetooth inquiry and Wi-Fi scans (every ~30 s), merged into one list.
+/// Also keeps the trusted-device list in sync with the exam session and
+/// raises [NewDeviceAlert]s for devices that appear after the baseline.
+///
+/// Sightings go into a private live store; the list is published at most
+/// every [_publishEvery] (immediately when a device appears or leaves, or
+/// for classic / Wi-Fi results), so the screen isn't rebuilt per packet.
 class ScannerViewModel extends Notifier<ScannerState> {
-  /// A device that has not advertised for this long is removed.
+  /// A BLE device that has not advertised for this long is removed.
   static const Duration _goneAfter = Duration(seconds: 30);
+
+  /// Classic Bluetooth and Wi-Fi results refresh only every ~35 s, and a
+  /// throttled Wi-Fi scan (Android: 4 per 2 min) doubles that gap.
+  static const Duration _slowGoneAfter = Duration(seconds: 150);
+
+  /// A BLE device silent this long is shown muted ("last seen Xs ago").
+  static const Duration _staleAfter = Duration(seconds: 15);
+  static const Duration _slowStaleAfter = Duration(seconds: 75);
+
+  /// Live values are coalesced and published at most this often.
+  static const Duration _publishEvery = Duration(milliseconds: 250);
 
   /// Phones, watches and earbuds change their random BLE address every few
   /// minutes. An entry silent for this long that looks exactly like a newly
   /// appeared address is treated as the same device.
   static const Duration _rotationGap = Duration(seconds: 5);
 
+  /// A new BLE device must be heard over at least this long before it
+  /// raises an alert (one stray packet is not enough).
+  static const Duration _bleConfirmSpan = Duration(seconds: 3);
+
+  /// Minimum signal for an alert: about inside the room.
+  static const int _alertRssi = -75;
+  static const int _hotspotAlertRssi = -80;
+
   late ScannerRepository _repository;
   late AppLogger _logger;
+  late DateTime Function() _now;
 
   StreamSubscription<ScannedDeviceModel>? _sightingsSub;
+  StreamSubscription<ScannedDeviceModel>? _classicSub;
+  StreamSubscription<List<ScannedDeviceModel>>? _wifiSub;
   StreamSubscription<bool>? _adapterSub;
   StreamSubscription<BleScanError?>? _problemSub;
+  StreamSubscription<WifiScanProblem?>? _wifiProblemSub;
   Timer? _evictTimer;
+  Timer? _publishTimer;
   Future<void>? _starting;
+
+  /// Latest known model per address (BLE rssi = last raw sample).
+  final Map<String, ScannedDeviceModel> _live = {};
+
+  /// Order of first appearance per address (stable list order).
+  final Map<String, int> _appearance = {};
+  int _nextAppearance = 0;
+
+  final RssiSmoother _smoother = RssiSmoother();
+  final Map<String, ProximityBand> _bands = {};
+  final StickyDeviceGrouper _grouper = StickyDeviceGrouper();
+  final NearestOrder _nearest = NearestOrder();
+
+  /// The running exam (trusted ids and baseline live there), or null.
+  SessionModel? _session;
+
+  /// Trust and baseline kept in memory when no exam session can store them.
+  final Set<String> _localTrusted = {};
+  DateTime? _localBaselineAt;
+
+  /// Every device that has raised an alert (or belongs to one that has).
+  final Set<String> _alertedIds = {};
 
   @override
   ScannerState build() {
     _repository = ref.watch(scannerRepositoryProvider);
     _logger = ref.watch(appLoggerProvider);
+    _now = ref.watch(scannerClockProvider);
+    _forgetAll();
 
-    ref.onDispose(_stop);
+    ref.onDispose(() {
+      _publishTimer?.cancel();
+      _publishTimer = null;
+      _stop();
+    });
 
     _adapterSub = _repository.bluetoothOn().listen(_onBluetoothOn);
     _problemSub = _repository.scanProblem().listen(
@@ -208,9 +457,374 @@ class ScannerViewModel extends Notifier<ScannerState> {
       onError: (Object e, StackTrace st) =>
           _logger.warning('BLE scan problem stream failed', e, st),
     );
+    _wifiProblemSub = _repository.wifiProblem().listen(
+      _onWifiProblem,
+      onError: (Object e, StackTrace st) =>
+          _logger.warning('Wi-Fi problem stream failed', e, st),
+    );
+
+    _session = _readSession();
     Future.microtask(() => toggleScanning(true));
-    return ScannerState();
+    return ScannerState(
+      trustedIds: _trustedIds(),
+      baselineAt: _baselineAt(),
+      hasSeatLayout: _session?.hasSeatLayout ?? false,
+    );
   }
+
+  // ── Session: trusted devices and baseline ────────────────────────────
+
+  SessionModel? _readSession() {
+    try {
+      ref.listen<SessionModel?>(
+        sessionViewModelProvider,
+        (_, next) => _onSession(next),
+        onError: (Object e, StackTrace st) =>
+            _logger.warning('Session unavailable to the scanner', e, st),
+      );
+      return _activeOnly(ref.read(sessionViewModelProvider));
+    } catch (e, st) {
+      _logger.warning('Session unavailable to the scanner', e, st);
+      return null;
+    }
+  }
+
+  static SessionModel? _activeOnly(SessionModel? s) =>
+      s != null && s.isActive ? s : null;
+
+  void _onSession(SessionModel? next) {
+    if (!ref.mounted) return;
+    final active = _activeOnly(next);
+    if (active?.id != _session?.id) {
+      // Another exam: its own trust list, baseline and alerts.
+      _localTrusted.clear();
+      _localBaselineAt = null;
+      _alertedIds.clear();
+      state = state.copyWith(alerts: const []);
+    }
+    _session = active;
+    _applyTrust();
+  }
+
+  Set<String> _trustedIds() => {
+    ...?_session?.trustedDeviceIds,
+    ..._localTrusted,
+  };
+
+  DateTime? _baselineAt() => _session?.baselineAt ?? _localBaselineAt;
+
+  /// Publishes trust/baseline; alerts of trusted devices are dropped.
+  void _applyTrust() {
+    final trusted = _trustedIds();
+    final baseline = _baselineAt();
+    state = state.copyWith(
+      trustedIds: trusted,
+      baselineAt: baseline,
+      clearBaseline: baseline == null,
+      hasSeatLayout: _session?.hasSeatLayout ?? false,
+      alerts: [
+        for (final a in state.alerts)
+          if (!trusted.contains(a.deviceId)) a,
+      ],
+    );
+    // "Nearest first" puts trusted devices last.
+    if (state.sortMode == ScanSortMode.nearest) _publish();
+  }
+
+  /// Takes the empty-room baseline: every device known right now (all
+  /// transports, every address of grouped devices) is trusted, and devices
+  /// appearing later can raise alerts. Returns how many ids were trusted.
+  Future<int> takeBaseline() async {
+    final ids = {..._live.keys};
+    try {
+      await ref.read(sessionViewModelProvider.notifier).setBaseline(ids);
+    } catch (e, st) {
+      _logger.warning(
+        'Baseline not saved to the session; kept in memory',
+        e,
+        st,
+      );
+      _localTrusted.addAll(ids);
+      _localBaselineAt = _now();
+    }
+    if (ref.mounted) _applyTrust();
+    return ids.length;
+  }
+
+  /// Trusts [deviceId] and every other address grouped with it. Its alert
+  /// is removed.
+  Future<void> trustDevice(String deviceId) async {
+    final ids = _groupIdsOf(deviceId);
+    try {
+      final session = ref.read(sessionViewModelProvider.notifier);
+      for (final id in ids) {
+        await session.trustDevice(id);
+      }
+    } catch (e, st) {
+      _logger.warning('Trust not saved to the session; kept in memory', e, st);
+      _localTrusted.addAll(ids);
+    }
+    if (ref.mounted) _applyTrust();
+  }
+
+  /// Removes trust from [deviceId] and every address grouped with it.
+  Future<void> untrustDevice(String deviceId) async {
+    final ids = _groupIdsOf(deviceId);
+    _localTrusted.removeAll(ids);
+    try {
+      final session = ref.read(sessionViewModelProvider.notifier);
+      for (final id in ids) {
+        if (_session?.trustedDeviceIds.contains(id) ?? false) {
+          await session.untrustDevice(id);
+        }
+      }
+    } catch (e, st) {
+      _logger.warning('Untrust not saved to the session', e, st);
+    }
+    if (ref.mounted) _applyTrust();
+  }
+
+  void acknowledgeAlert(String deviceId) {
+    state = state.copyWith(
+      alerts: [
+        for (final a in state.alerts)
+          a.deviceId == deviceId ? a.copyWith(acknowledged: true) : a,
+      ],
+    );
+  }
+
+  void acknowledgeAll() {
+    if (state.unacknowledgedAlertCount == 0) return;
+    state = state.copyWith(
+      alerts: [for (final a in state.alerts) a.copyWith(acknowledged: true)],
+    );
+  }
+
+  Set<String> _groupIdsOf(String deviceId) {
+    _publishPending();
+    for (final g in state.groups) {
+      if (g.members.any((m) => m.id == deviceId)) {
+        return {for (final m in g.members) m.id};
+      }
+    }
+    return {deviceId};
+  }
+
+  /// Raises one alert for [device] if it is new since the baseline, not
+  /// trusted, close enough and confirmed (BLE: heard over ≥ 3 s).
+  void _maybeAlert(ScannedDeviceModel device) {
+    final baseline = state.baselineAt;
+    if (baseline == null) return;
+    if (_alertedIds.contains(device.id) || state.isTrusted(device.id)) return;
+    if (!device.firstSeen.isAfter(baseline)) return;
+
+    final strongEnough = switch (device.transport) {
+      DeviceTransport.wifi =>
+        device.deviceType == WirelessClassifier.hotspotType &&
+            device.rssi >= _hotspotAlertRssi,
+      _ => device.rssi >= _alertRssi,
+    };
+    if (!strongEnough) return;
+    if (device.isBle &&
+        device.lastSeen.difference(device.firstSeen) < _bleConfirmSpan) {
+      return;
+    }
+
+    _publishPending();
+    for (final g in state.groups) {
+      if (!g.members.any((m) => m.id == device.id)) continue;
+      final others = g.members.where((m) => m.id != device.id);
+      if (others.any((m) => state.isTrusted(m.id))) return;
+      if (others.any((m) => _alertedIds.contains(m.id))) {
+        // Another address of an already reported device.
+        _alertedIds.add(device.id);
+        return;
+      }
+      break;
+    }
+
+    _alertedIds.add(device.id);
+    state = state.copyWith(
+      alerts: [
+        NewDeviceAlert(
+          deviceId: device.id,
+          displayName: device.displayName,
+          deviceType: device.deviceType,
+          transport: device.transport,
+          rssi: device.rssi,
+          detectedAt: _now(),
+        ),
+        ...state.alerts,
+      ],
+      alertSeq: state.alertSeq + 1,
+    );
+  }
+
+  // ── List order and selection ─────────────────────────────────────────
+
+  /// Switches between "Stable" and "Nearest first" for this session.
+  void setSortMode(ScanSortMode mode) {
+    if (mode == state.sortMode) return;
+    _nearest.reset();
+    state = state.copyWith(sortMode: mode);
+    _publish();
+  }
+
+  /// Enters multi-select mode, optionally picking [deviceId] first.
+  void startSelection([String? deviceId]) {
+    state = state.copyWith(isSelecting: true, selectedIds: const {});
+    if (deviceId != null) toggleSelected(deviceId);
+  }
+
+  /// Picks or unpicks the device (all addresses of its group) for
+  /// "Walk & find". Only BLE devices, at most
+  /// [ScannerState.maxWalkTargets].
+  void toggleSelected(String deviceId) {
+    _publishPending();
+    final groupIds = _groupIdsOf(deviceId);
+    final selected = {...state.selectedIds};
+    if (selected.any(groupIds.contains)) {
+      selected.removeAll(groupIds);
+    } else {
+      final device = _live[deviceId];
+      if (device == null) return;
+      if (!device.isBle) {
+        _notify('scan_select_ble_only');
+        return;
+      }
+      if (selected.length >= ScannerState.maxWalkTargets) {
+        _notify('scan_select_limit', {'max': '${ScannerState.maxWalkTargets}'});
+        return;
+      }
+      selected.add(deviceId);
+    }
+    state = state.copyWith(isSelecting: true, selectedIds: selected);
+  }
+
+  void cancelSelection() {
+    state = state.copyWith(isSelecting: false, selectedIds: const {});
+  }
+
+  /// Devices for "Walk & find strongest untrusted"; empty (with a notice)
+  /// when there is none.
+  List<ScannedDeviceModel> strongestUntrustedTargets() {
+    _publishPending();
+    final targets = state.strongestUntrusted();
+    if (targets.isEmpty) _notify('scan_walk_none');
+    return targets;
+  }
+
+  // ── Publishing ───────────────────────────────────────────────────────
+
+  /// Publishes soon (coalescing further updates until then).
+  void _schedulePublish() {
+    _publishTimer ??= Timer(_publishEvery, _publish);
+  }
+
+  /// Publishes now if an update is waiting.
+  void _publishPending() {
+    if (_publishTimer != null) _publish();
+  }
+
+  /// The model as shown: BLE signal smoothed.
+  ScannedDeviceModel _shown(ScannedDeviceModel d) {
+    if (!d.isBle) return d;
+    final smoothed = _smoother.valueOf(d.id);
+    return smoothed == null ? d : d.copyWith(rssi: smoothed.round());
+  }
+
+  bool _isStaleAt(ScannedDeviceModel d, DateTime now) =>
+      !d.isConnected &&
+      now.difference(d.lastSeen) > (d.isBle ? _staleAfter : _slowStaleAfter);
+
+  /// Publishes the live store: smoothed values, proximity bands, staleness,
+  /// sticky groups in the chosen order.
+  void _publish() {
+    _publishTimer?.cancel();
+    _publishTimer = null;
+    if (!ref.mounted) return;
+    final now = _now();
+
+    final shown = [for (final d in _live.values) _shown(d)]
+      ..sort((a, b) => b.firstSeen.compareTo(a.firstSeen));
+    for (final d in shown) {
+      _bands[d.id] = ProximityBand.next(_bands[d.id], d.rssi);
+    }
+    _bands.removeWhere((id, _) => !_live.containsKey(id));
+    final stale = {
+      for (final d in shown)
+        if (_isStaleAt(d, now)) d.id,
+    };
+
+    final grouped = _grouper.group(
+      shown,
+      now: now,
+      isSilent: (d) => stale.contains(d.id),
+    );
+    final selected = {
+      for (final id in state.selectedIds)
+        if (_live.containsKey(id)) id,
+    };
+
+    state = state.copyWith(
+      devices: shown,
+      groups: _ordered(grouped, now),
+      staleIds: stale,
+      bands: Map.unmodifiable(_bands),
+      asOf: now,
+      selectedIds: selected,
+    );
+  }
+
+  int _appearanceOf(ScannedDeviceGroup g) => g.members
+      .map((m) => _appearance[m.id] ?? 1 << 30)
+      .reduce((a, b) => a < b ? a : b);
+
+  List<ScannedDeviceGroup> _ordered(
+    List<ScannedDeviceGroup> groups,
+    DateTime now,
+  ) {
+    final byAppearance = [...groups]
+      ..sort((a, b) {
+        final c = _appearanceOf(a).compareTo(_appearanceOf(b));
+        return c != 0 ? c : a.id.compareTo(b.id);
+      });
+    if (state.sortMode == ScanSortMode.stable) return byAppearance;
+
+    final byKey = {for (final g in byAppearance) g.id: g};
+    final keys = _nearest.order([
+      for (final g in byAppearance)
+        (
+          key: g.id,
+          rssi: g.strongestRssi.toDouble(),
+          trusted: g.members.any((m) => state.trustedIds.contains(m.id)),
+        ),
+    ], now);
+    return [for (final k in keys) byKey[k]!];
+  }
+
+  void _forget(String id) {
+    _live.remove(id);
+    _appearance.remove(id);
+    _smoother.remove(id);
+    _bands.remove(id);
+  }
+
+  void _forgetAll() {
+    _live.clear();
+    _appearance.clear();
+    _smoother.clear();
+    _bands.clear();
+    _grouper.reset();
+    _nearest.reset();
+  }
+
+  void _addNew(ScannedDeviceModel device) {
+    _appearance[device.id] = _nextAppearance++;
+    _live[device.id] = device;
+  }
+
+  // ── Scan lifecycle ───────────────────────────────────────────────────
 
   /// Location off: Android silently returns no BLE results. The scan owner
   /// stays registered so the shared scan resumes once Location is back.
@@ -219,6 +833,24 @@ class ScannerViewModel extends Notifier<ScannerState> {
     final isOff = problem == BleScanError.locationOff;
     if (isOff == state.isLocationOff) return;
     state = state.copyWith(isLocationOff: isOff);
+  }
+
+  /// While Wi-Fi scanning has a problem its old results are dropped, so no
+  /// stale hotspot is shown as present.
+  void _onWifiProblem(WifiScanProblem? problem) {
+    if (!ref.mounted || problem == state.wifiProblem) return;
+    state = state.copyWith(
+      wifiProblem: problem,
+      clearWifiProblem: problem == null,
+    );
+    if (problem != null) {
+      final wifiIds = [
+        for (final d in _live.values)
+          if (d.transport == DeviceTransport.wifi) d.id,
+      ];
+      wifiIds.forEach(_forget);
+      if (wifiIds.isNotEmpty) _publish();
+    }
   }
 
   /// Opens the system Location settings so the user can turn Location on.
@@ -268,6 +900,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
     final shouldScan = enable ?? !state.isScanning;
     if (!shouldScan) {
       _stop(keepAdapterListener: true);
+      _publishPending();
       state = state.copyWith(isScanning: false);
       return;
     }
@@ -292,9 +925,13 @@ class ScannerViewModel extends Notifier<ScannerState> {
       },
     );
     _evictTimer?.cancel();
-    _evictTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _evictTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _evictStaleDevices();
     });
+
+    // Classic and Wi-Fi are extras: if they fail, BLE still runs.
+    await _startSlowScans();
+    if (!ref.mounted) return;
 
     try {
       await _repository.startScan();
@@ -320,6 +957,35 @@ class ScannerViewModel extends Notifier<ScannerState> {
     }
   }
 
+  Future<void> _startSlowScans() async {
+    if (_repository.isClassicSupported) {
+      _classicSub?.cancel();
+      _classicSub = _repository.classicSightings().listen(
+        _onClassicSighting,
+        onError: (Object e, StackTrace st) =>
+            _logger.warning('Classic Bluetooth discovery error', e, st),
+      );
+      try {
+        await _repository.startClassicDiscovery();
+      } catch (e, st) {
+        _logger.warning('Classic Bluetooth discovery did not start', e, st);
+      }
+    }
+    if (_repository.isWifiSupported) {
+      _wifiSub?.cancel();
+      _wifiSub = _repository.wifiSightings().listen(
+        _onWifiScan,
+        onError: (Object e, StackTrace st) =>
+            _logger.warning('Wi-Fi scan error', e, st),
+      );
+      try {
+        await _repository.startWifiScan();
+      } catch (e, st) {
+        _logger.warning('Wi-Fi scan did not start', e, st);
+      }
+    }
+  }
+
   /// Maps a scan failure to a translatable message. Known core messages get
   /// their own key; anything else is shown as reported. Location off is
   /// not an error: it is shown through [ScannerState.isLocationOff].
@@ -338,20 +1004,32 @@ class ScannerViewModel extends Notifier<ScannerState> {
     }
   }
 
+  /// Runs every second: devices silent past the gone-after time are
+  /// removed; quiet ones are re-published so "last seen Xs ago" counts up.
   void _evictStaleDevices() {
-    final now = DateTime.now();
-    final fresh = state.devices
-        .where((d) => d.isConnected || now.difference(d.lastSeen) < _goneAfter)
-        .toList();
-    if (fresh.length != state.devices.length) {
-      state = state.copyWith(devices: fresh);
-    }
+    if (!ref.mounted) return;
+    final now = _now();
+    final gone = [
+      for (final d in _live.values)
+        if (!d.isConnected &&
+            now.difference(d.lastSeen) >=
+                (d.isBle ? _goneAfter : _slowGoneAfter))
+          d.id,
+    ];
+    gone.forEach(_forget);
+    final anyStale = _live.values.any((d) => _isStaleAt(d, now));
+    if (gone.isNotEmpty || anyStale || state.staleIds.isNotEmpty) _publish();
   }
 
   /// Connects to a device on the inspector's request and reads what it exposes.
   Future<void> probeDeviceConnection(String deviceId) async {
-    final target = _find(deviceId);
-    if (target == null || target.isConnected || target.isConnecting) return;
+    final target = _live[deviceId];
+    if (target == null ||
+        !target.isBle ||
+        target.isConnected ||
+        target.isConnecting) {
+      return;
+    }
 
     _replace(deviceId, (d) => d.copyWith(isConnecting: true));
     try {
@@ -444,19 +1122,17 @@ class ScannerViewModel extends Notifier<ScannerState> {
     }
   }
 
+  // ── Sightings ────────────────────────────────────────────────────────
+
   void _onSighting(ScannedDeviceModel seen) {
     if (!ref.mounted) return;
-    final existing = _find(seen.id);
+    final existing = _live[seen.id];
     final rotatedFrom = existing == null ? _rotatedFrom(seen) : null;
     final previous = existing ?? rotatedFrom;
 
     final device = previous == null
         ? seen
         : seen.copyWith(
-            // Light smoothing keeps the list readable without hiding movement.
-            rssi: existing == null
-                ? seen.rssi
-                : ((0.6 * seen.rssi) + (0.4 * existing.rssi)).round(),
             isConnectable: seen.isConnectable || previous.isConnectable,
             firstSeen: previous.firstSeen,
             isConnected: existing?.isConnected,
@@ -465,24 +1141,98 @@ class ScannerViewModel extends Notifier<ScannerState> {
             fullGattName: existing?.fullGattName,
           );
 
-    final devices = [
-      for (final d in state.devices)
-        if (d.id != seen.id && d.id != rotatedFrom?.id) d,
-      device,
-    ]..sort((a, b) => b.firstSeen.compareTo(a.firstSeen));
+    if (rotatedFrom != null) {
+      _inheritFromRotated(rotatedFrom.id, seen.id);
+      // The new address takes the old card's place in the list.
+      final place = _appearance[rotatedFrom.id];
+      _forget(rotatedFrom.id);
+      _live[seen.id] = device;
+      _appearance[seen.id] = place ?? _nextAppearance++;
+    } else if (existing == null) {
+      _addNew(device);
+    } else {
+      _live[seen.id] = device;
+    }
+    _smoother.add(seen.id, seen.rssi);
 
-    state = state.copyWith(devices: devices);
+    // Appearing (or replacing) devices show at once; value updates are
+    // coalesced.
+    if (existing == null) {
+      _publish();
+    } else {
+      _schedulePublish();
+    }
+    _maybeAlert(_shown(device));
+  }
+
+  /// A rotated address keeps its old entry's trust and alert state.
+  void _inheritFromRotated(String oldId, String newId) {
+    if (_alertedIds.contains(oldId)) _alertedIds.add(newId);
+    final selected = state.selectedIds;
+    if (selected.contains(oldId)) {
+      state = state.copyWith(selectedIds: {...selected, newId});
+    }
+    if (!state.isTrusted(oldId) || state.isTrusted(newId)) return;
+    _localTrusted.add(newId);
+    state = state.copyWith(trustedIds: {...state.trustedIds, newId});
+    unawaited(_persistTrust(newId));
+  }
+
+  Future<void> _persistTrust(String id) async {
+    try {
+      await ref.read(sessionViewModelProvider.notifier).trustDevice(id);
+    } catch (e, st) {
+      _logger.warning('Rotated address trust kept in memory only', e, st);
+    }
+  }
+
+  void _onClassicSighting(ScannedDeviceModel seen) {
+    if (!ref.mounted) return;
+    final existing = _live[seen.id];
+    final device = existing == null
+        ? seen
+        : seen.copyWith(
+            name: seen.name.isEmpty ? existing.name : null,
+            deviceType: seen.deviceType == WirelessClassifier.classicOtherType
+                ? existing.deviceType
+                : null,
+            isHighSuspicion: seen.isHighSuspicion || existing.isHighSuspicion,
+            firstSeen: existing.firstSeen,
+          );
+    existing == null ? _addNew(device) : _live[device.id] = device;
+    _publish();
+    _maybeAlert(device);
+  }
+
+  void _onWifiScan(List<ScannedDeviceModel> scan) {
+    if (!ref.mounted || scan.isEmpty) return;
+    final merged = [
+      for (final seen in scan)
+        if (_live[seen.id] case final existing?)
+          seen.copyWith(firstSeen: existing.firstSeen)
+        else
+          seen,
+    ];
+    for (final d in merged) {
+      _live.containsKey(d.id) ? _live[d.id] = d : _addNew(d);
+    }
+    _publish();
+    for (final d in merged) {
+      _maybeAlert(d);
+    }
   }
 
   /// The entry a newly seen address most likely replaced: same name (or,
   /// for nameless devices, same vendor, category and services) and silent
   /// since before [_rotationGap]. Two identical devices that are both
-  /// advertising are never merged.
+  /// advertising are never merged. BLE only: classic and Wi-Fi addresses
+  /// don't rotate.
   ScannedDeviceModel? _rotatedFrom(ScannedDeviceModel seen) {
-    final now = DateTime.now();
+    if (!seen.isBle) return null;
+    final now = _now();
     ScannedDeviceModel? match;
-    for (final d in state.devices) {
-      if (d.isConnected || d.isConnecting) continue;
+    for (final d in _live.values) {
+      if (!d.isBle || d.isConnected || d.isConnecting) continue;
       if (now.difference(d.lastSeen) < _rotationGap) continue;
       final sameIdentity = seen.hasName || d.hasName
           ? seen.name.trim() == d.name.trim()
@@ -501,24 +1251,20 @@ class ScannerViewModel extends Notifier<ScannerState> {
   static bool _sameServices(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
-  ScannedDeviceModel? _find(String id) {
-    for (final d in state.devices) {
-      if (d.id == id) return d;
-    }
-    return null;
-  }
-
   void _replace(
     String id,
     ScannedDeviceModel Function(ScannedDeviceModel) update,
   ) {
-    state = state.copyWith(
-      devices: [for (final d in state.devices) d.id == id ? update(d) : d],
-    );
+    final d = _live[id];
+    if (d == null) return;
+    _live[id] = update(d);
+    _publish();
   }
 
   void clearResults() {
-    state = state.copyWith(devices: []);
+    _forgetAll();
+    state = state.copyWith(isSelecting: false, selectedIds: const {});
+    _publish();
   }
 
   void _stop({bool keepAdapterListener = false}) {
@@ -526,18 +1272,36 @@ class ScannerViewModel extends Notifier<ScannerState> {
     _evictTimer = null;
     _sightingsSub?.cancel();
     _sightingsSub = null;
+    _classicSub?.cancel();
+    _classicSub = null;
+    _wifiSub?.cancel();
+    _wifiSub = null;
     _repository.stopScan();
+    if (_repository.isClassicSupported) {
+      _repository.stopClassicDiscovery().catchError(
+        (Object e, StackTrace st) =>
+            _logger.warning('Stopping classic discovery failed', e, st),
+      );
+    }
+    if (_repository.isWifiSupported) {
+      _repository.stopWifiScan().catchError(
+        (Object e, StackTrace st) =>
+            _logger.warning('Stopping Wi-Fi scan failed', e, st),
+      );
+    }
     if (!keepAdapterListener) {
       _adapterSub?.cancel();
       _adapterSub = null;
       _problemSub?.cancel();
       _problemSub = null;
+      _wifiProblemSub?.cancel();
+      _wifiProblemSub = null;
     }
   }
 }
 
-/// Auto-disposed so the BLE scan stops once the dashboard and scanner
-/// screens are gone (e.g. after End Exam).
+/// Auto-disposed so the scans stop once the dashboard and scanner screens
+/// are gone (e.g. after End Exam).
 final scannerViewModelProvider =
     NotifierProvider.autoDispose<ScannerViewModel, ScannerState>(
       ScannerViewModel.new,

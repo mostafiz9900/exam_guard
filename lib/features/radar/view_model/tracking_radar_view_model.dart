@@ -4,8 +4,10 @@ import 'dart:math' as math;
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/audio/geiger_buzzer_service.dart';
+import 'package:exam_guard/core/services/audio/haptic_service.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/logger/app_logger.dart';
+import 'package:exam_guard/features/radar/model/proximity_meter.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/repository/radar_repository.dart';
 import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
@@ -28,6 +30,14 @@ class TrackingRadarState {
   final List<int> rssiHistory;
   final bool isAudioAlertEnabled;
 
+  /// Vibrate stronger / faster as closeness rises.
+  final bool isVibrationEnabled;
+
+  /// Highest closeness (0–100) since the target was chosen or the peak was
+  /// reset ("best so far"), and the smoothed RSSI it was reached at.
+  final int? peakCloseness;
+  final double? peakRssi;
+
   /// True when the target has not advertised for [TrackingRadarViewModel.signalLostAfter].
   final bool isSignalLost;
 
@@ -48,6 +58,9 @@ class TrackingRadarState {
     this.trend = ProximityTrend.stationary,
     this.rssiHistory = const [],
     this.isAudioAlertEnabled = true,
+    this.isVibrationEnabled = true,
+    this.peakCloseness,
+    this.peakRssi,
     this.isSignalLost = false,
     this.errorKey,
     this.isLocationOff = false,
@@ -64,6 +77,13 @@ class TrackingRadarState {
   bool get hasLiveSignal =>
       smoothedRssi != null && !isSignalLost && errorKey == null;
 
+  /// 0–100 % closeness from the smoothed RSSI; null without a live signal.
+  int? get closeness {
+    final rssi = smoothedRssi;
+    if (rssi == null || !hasLiveSignal) return null;
+    return ProximityMeter.closenessPercent(rssi);
+  }
+
   TrackingRadarState copyWith({
     ScannedDeviceModel? device,
     double? Function()? distanceMeters,
@@ -73,6 +93,9 @@ class TrackingRadarState {
     ProximityTrend? trend,
     List<int>? rssiHistory,
     bool? isAudioAlertEnabled,
+    bool? isVibrationEnabled,
+    int? Function()? peakCloseness,
+    double? Function()? peakRssi,
     bool? isSignalLost,
     String? Function()? errorKey,
     bool? isLocationOff,
@@ -88,6 +111,11 @@ class TrackingRadarState {
       trend: trend ?? this.trend,
       rssiHistory: rssiHistory ?? this.rssiHistory,
       isAudioAlertEnabled: isAudioAlertEnabled ?? this.isAudioAlertEnabled,
+      isVibrationEnabled: isVibrationEnabled ?? this.isVibrationEnabled,
+      peakCloseness: peakCloseness != null
+          ? peakCloseness()
+          : this.peakCloseness,
+      peakRssi: peakRssi != null ? peakRssi() : this.peakRssi,
       isSignalLost: isSignalLost ?? this.isSignalLost,
       errorKey: errorKey != null ? errorKey() : this.errorKey,
       isLocationOff: isLocationOff ?? this.isLocationOff,
@@ -130,10 +158,18 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   static const Duration signalLostAfter = Duration(seconds: 5);
   static const int _historyLength = 20;
 
+  /// Packets of a fresh measurement before it may set the peak (the first
+  /// packets are not smoothed yet).
+  static const int peakWarmUpPackets = 3;
+
   late RadarRepository _repository;
   late GeigerBuzzerService _buzzer;
   late AppLogger _logger;
+  late IHapticService _haptics;
   final RssiTrendFilter _filter = RssiTrendFilter();
+  final PeakHold _peak = PeakHold();
+  final HapticPulseLimiter _pulses = HapticPulseLimiter();
+  int _packetsSinceReset = 0;
   StreamSubscription<RadarSignal>? _sub;
   StreamSubscription<BleScanError?>? _problemSub;
   Timer? _lostTimer;
@@ -147,6 +183,9 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _repository = ref.watch(radarRepositoryProvider);
     _buzzer = ref.watch(geigerBuzzerProvider);
     _logger = ref.watch(appLoggerProvider);
+    _haptics = ref.watch(hapticServiceProvider);
+    // Keep the display on while the radar is open; released on dispose.
+    _repository.keepScreenOn(RadarRepository.radarOwner);
     ref.onDispose(_stop);
     return const TrackingRadarState();
   }
@@ -155,9 +194,11 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   /// is shown until the first live packet arrives.
   Future<void> setTargetDevice(ScannedDeviceModel device) async {
     if (state.device?.id == device.id) return;
+    _peak.reset();
     state = TrackingRadarState(
       device: device,
       isAudioAlertEnabled: state.isAudioAlertEnabled,
+      isVibrationEnabled: state.isVibrationEnabled,
     );
     _lostTimer?.cancel();
     _lostTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -183,7 +224,7 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   Future<void> _startTracking() async {
     final device = state.device;
     if (device == null) return;
-    _filter.reset();
+    _resetFilter();
     _lastPacketAt = DateTime.now();
 
     await _sub?.cancel();
@@ -256,7 +297,7 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   /// fresh packet instead of showing the pre-outage distance.
   void _onLocationBack() {
     if (!ref.mounted) return;
-    _filter.reset();
+    _resetFilter();
     _lastPacketAt = DateTime.now();
     state = state.copyWith(
       isLocationOff: false,
@@ -308,7 +349,12 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _lastPacketAt = DateTime.now();
 
     _filter.add(rssi, at);
+    _packetsSinceReset++;
     final smoothed = _filter.smoothed!;
+    final closeness = ProximityMeter.closenessPercent(smoothed);
+    if (_packetsSinceReset >= peakWarmUpPackets) {
+      _peak.add(closeness, smoothed);
+    }
     final distance = TrackingRadarState.calculateDistance(
       smoothed,
       rssiAt1m: TrackingRadarState.rssiAt1m(device.txPower),
@@ -325,11 +371,40 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
       threatLevel: ThreatLevel.fromDistance(distance),
       trend: _filter.trend,
       rssiHistory: newHistory,
+      peakCloseness: () => _peak.percent,
+      peakRssi: () => _peak.rssi,
       isSignalLost: false,
       errorKey: () => null,
       isLocationOff: false,
     );
     _updateBuzzer();
+    _pulseHaptics(closeness, DateTime.now());
+  }
+
+  void _resetFilter() {
+    _filter.reset();
+    _packetsSinceReset = 0;
+    _pulses.reset();
+  }
+
+  /// Clears "best so far"; the next packets set a new peak.
+  void resetPeak() {
+    _peak.reset();
+    _packetsSinceReset = 0;
+    state = state.copyWith(peakCloseness: () => null, peakRssi: () => null);
+  }
+
+  void toggleVibration() {
+    state = state.copyWith(isVibrationEnabled: !state.isVibrationEnabled);
+  }
+
+  /// Stronger, faster pulses as closeness rises (rate-limited per band).
+  void _pulseHaptics(int closeness, DateTime now) {
+    if (!state.isVibrationEnabled || _alertsSuspended || !state.hasLiveSignal) {
+      return;
+    }
+    final strength = _pulses.next(closeness, now);
+    if (strength != null) _haptics.pulse(strength);
   }
 
   void toggleAudioAlert() {
@@ -384,6 +459,7 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _sub?.cancel();
     _problemSub?.cancel();
     _buzzer.stopBuzzer();
+    _repository.releaseScreen(RadarRepository.radarOwner);
     _repository.stopTracking().catchError((Object e, StackTrace st) {
       _logger.warning('Radar could not stop scanning', e, st);
     });
