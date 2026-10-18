@@ -50,6 +50,12 @@ class _Bluetooth implements IBluetoothService {
 }
 
 class _Classic implements IClassicBluetoothService {
+  @override
+  Future<void> suspend(String key) async {}
+
+  @override
+  Future<void> resume(String key) async {}
+
   final records = StreamController<ClassicBtRecord>.broadcast();
   final owners = <String>{};
 
@@ -70,6 +76,12 @@ class _Classic implements IClassicBluetoothService {
 }
 
 class _Wifi implements IWifiScanService {
+  @override
+  Future<void> suspend(String key) async {}
+
+  @override
+  Future<void> resume(String key) async {}
+
   final scans = StreamController<List<WifiNetworkRecord>>.broadcast();
   final problems = StreamController<WifiScanProblem?>.broadcast();
   final owners = <String>{};

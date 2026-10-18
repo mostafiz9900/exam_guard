@@ -1,8 +1,10 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
+import 'package:exam_guard/core/services/classic_bluetooth/i_classic_bluetooth_service.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 import 'package:exam_guard/core/services/wakelock/i_wakelock_service.dart';
+import 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart';
 
 /// One received signal from the tracked device.
 class RadarSignal {
@@ -20,7 +22,13 @@ class RadarSignal {
 /// Live signal strength of BLE devices for the finder screens (radar, walk
 /// finder, seat sweep). Each screen uses its own scan / wake lock owner.
 class RadarRepository {
-  RadarRepository(this._bluetooth, this._permissions, this._wakelock);
+  RadarRepository(
+    this._bluetooth,
+    this._permissions,
+    this._wakelock, {
+    this._classic,
+    this._wifi,
+  });
 
   static const String radarOwner = 'tracking_radar';
   static const String walkFinderOwner = 'walk_finder';
@@ -29,12 +37,26 @@ class RadarRepository {
   final IBluetoothService _bluetooth;
   final IPermissionService _permissions;
   final IWakelockService _wakelock;
+  final IClassicBluetoothService? _classic;
+  final IWifiScanService? _wifi;
 
-  Future<void> startTracking({String owner = radarOwner}) =>
-      _bluetooth.startScan(owner);
+  /// Starts BLE scanning for a finder screen. Classic Bluetooth inquiries
+  /// (which starve BLE for ~12 s) and Wi-Fi scans are paused meanwhile, so
+  /// the target's signal doesn't drop out (seen on a Samsung A07).
+  Future<void> startTracking({String owner = radarOwner}) async {
+    await _classic?.suspend(owner);
+    await _wifi?.suspend(owner);
+    await _bluetooth.startScan(owner);
+  }
 
-  Future<void> stopTracking({String owner = radarOwner}) =>
-      _bluetooth.stopScan(owner);
+  Future<void> stopTracking({String owner = radarOwner}) async {
+    try {
+      await _bluetooth.stopScan(owner);
+    } finally {
+      await _classic?.resume(owner);
+      await _wifi?.resume(owner);
+    }
+  }
 
   /// What currently stops the scan from receiving anything (e.g. Location
   /// off), or null when it works. Current value first, then every change.
@@ -73,5 +95,7 @@ final radarRepositoryProvider = Provider<RadarRepository>(
     ref.watch(bluetoothServiceProvider),
     ref.watch(permissionServiceProvider),
     ref.watch(wakelockServiceProvider),
+    classic: ref.watch(classicBluetoothServiceProvider),
+    wifi: ref.watch(wifiScanServiceProvider),
   ),
 );

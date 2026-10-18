@@ -49,6 +49,14 @@ abstract interface class IClassicBluetoothService {
 
   Future<void> stop(String owner);
 
+  /// Pauses inquiry cycles while [key] holds a pause (a running inquiry is
+  /// cancelled). Finder screens use this: an inquiry starves BLE scanning
+  /// for ~12 s, which makes live signal tracking drop out.
+  Future<void> suspend(String key);
+
+  /// Releases [key]'s pause; cycles resume when no pause is held.
+  Future<void> resume(String key);
+
   Future<void> dispose();
 }
 

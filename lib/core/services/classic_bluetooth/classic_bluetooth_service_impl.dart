@@ -24,7 +24,9 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
     this._logger, {
     bool? isAndroid,
     this._channel = const EventChannel('exam_guard/classic_bt'),
-    this._pause = const Duration(seconds: 20),
+    // ~12 s inquiry per ~57 s: classic earpieces still show within a
+    // minute, while BLE scanning (alerts, live list) keeps most airtime.
+    this._pause = const Duration(seconds: 45),
     this._cycleTimeout = const Duration(seconds: 20),
   }) : _isAndroid = isAndroid ?? Platform.isAndroid;
 
@@ -37,6 +39,7 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
   final Duration _cycleTimeout;
 
   final Set<String> _owners = {};
+  final Set<String> _suspenders = {};
   final StreamController<ClassicBtRecord> _records =
       StreamController<ClassicBtRecord>.broadcast();
 
@@ -65,6 +68,18 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
     return _serial(_sync);
   }
 
+  @override
+  Future<void> suspend(String key) {
+    _suspenders.add(key);
+    return _serial(_sync);
+  }
+
+  @override
+  Future<void> resume(String key) {
+    _suspenders.remove(key);
+    return _serial(_sync);
+  }
+
   Future<void> _serial(Future<void> Function() op) {
     final result = _queue.then((_) => op());
     _queue = result.catchError((Object e, StackTrace st) {
@@ -75,7 +90,7 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
 
   Future<void> _sync() async {
     if (!isSupported || _disposed) return;
-    if (_owners.isNotEmpty) {
+    if (_active) {
       _loop ??= _runLoop();
       return;
     }
@@ -90,7 +105,8 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
     if (wake != null && !wake.isCompleted) wake.complete();
   }
 
-  bool get _active => _owners.isNotEmpty && !_disposed;
+  bool get _active =>
+      _owners.isNotEmpty && _suspenders.isEmpty && !_disposed;
 
   Future<void> _runLoop() async {
     try {

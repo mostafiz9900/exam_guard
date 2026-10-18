@@ -1,6 +1,8 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
+import 'package:exam_guard/core/services/classic_bluetooth/i_classic_bluetooth_service.dart';
+import 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 
 /// One received 2.4 GHz packet.
@@ -26,7 +28,12 @@ class RfPacket {
 
 /// Live 2.4 GHz activity from the phone's Bluetooth radio.
 class RfRepository {
-  RfRepository(this._bluetooth, this._permissions);
+  RfRepository(
+    this._bluetooth,
+    this._permissions, {
+    this._classic,
+    this._wifi,
+  });
 
   static const String _scanOwner = 'rf_detector';
 
@@ -38,6 +45,8 @@ class RfRepository {
 
   final IBluetoothService _bluetooth;
   final IPermissionService _permissions;
+  final IClassicBluetoothService? _classic;
+  final IWifiScanService? _wifi;
 
   Future<AppPermissionStatus> requestPermissions() =>
       _permissions.requestBluetoothScan();
@@ -49,9 +58,23 @@ class RfRepository {
   Stream<BleAdapterStatus> adapterStatus() => _bluetooth.adapterStatus();
 
   /// Throws [BleScanException] when the radio cannot start scanning.
-  Future<void> startScan() => _bluetooth.startScan(_scanOwner);
+  /// Classic Bluetooth inquiries starve BLE for ~12 s, which made the meter
+  /// read "0 transmitters / QUIET" every half minute; pause them (and Wi-Fi
+  /// scans) while the meter is open.
+  Future<void> startScan() async {
+    await _classic?.suspend(_scanOwner);
+    await _wifi?.suspend(_scanOwner);
+    await _bluetooth.startScan(_scanOwner);
+  }
 
-  Future<void> stopScan() => _bluetooth.stopScan(_scanOwner);
+  Future<void> stopScan() async {
+    try {
+      await _bluetooth.stopScan(_scanOwner);
+    } finally {
+      await _classic?.resume(_scanOwner);
+      await _wifi?.resume(_scanOwner);
+    }
+  }
 
   /// What currently stops the scan from receiving anything (e.g. Location
   /// off), or null when it works. Current value first, then every change.
@@ -77,5 +100,7 @@ final rfRepositoryProvider = Provider<RfRepository>(
   (ref) => RfRepository(
     ref.watch(bluetoothServiceProvider),
     ref.watch(permissionServiceProvider),
+    classic: ref.watch(classicBluetoothServiceProvider),
+    wifi: ref.watch(wifiScanServiceProvider),
   ),
 );

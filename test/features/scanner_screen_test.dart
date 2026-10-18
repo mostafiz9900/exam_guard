@@ -92,6 +92,12 @@ BleScanRecord _apple(String id, int rssi, {String name = ''}) => BleScanRecord(
 );
 
 class _FakeClassic implements IClassicBluetoothService {
+  @override
+  Future<void> suspend(String key) async {}
+
+  @override
+  Future<void> resume(String key) async {}
+
   final records = StreamController<ClassicBtRecord>.broadcast();
 
   @override

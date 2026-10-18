@@ -43,6 +43,7 @@ class WifiScanServiceImpl implements IWifiScanService {
   final DateTime Function() _clock;
 
   final Set<String> _owners = {};
+  final Set<String> _suspenders = {};
   final StreamController<List<WifiNetworkRecord>> _results =
       StreamController<List<WifiNetworkRecord>>.broadcast();
   final StreamController<WifiScanProblem?> _problems =
@@ -92,6 +93,12 @@ class WifiScanServiceImpl implements IWifiScanService {
     _owners.remove(owner);
     return _serial(_sync);
   }
+
+  @override
+  Future<void> suspend(String key) async => _suspenders.add(key);
+
+  @override
+  Future<void> resume(String key) async => _suspenders.remove(key);
 
   Future<void> _serial(Future<void> Function() op) {
     final result = _queue.then((_) => op());
@@ -150,7 +157,10 @@ class WifiScanServiceImpl implements IWifiScanService {
 
     final now = _clock();
     final last = _lastScan;
-    final due = last == null || now.difference(last) >= _scanInterval;
+    // While a finder screen holds a pause, keep the last results.
+    final due =
+        _suspenders.isEmpty &&
+        (last == null || now.difference(last) >= _scanInterval);
     // A fresh owner (or a cleared problem) gets cached results right away
     // instead of waiting for the throttle window.
     if (!due && _emittedThisRun && _problem == null) return;

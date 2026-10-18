@@ -50,6 +50,12 @@ class _Bluetooth implements IBluetoothService {
 }
 
 class _Classic implements IClassicBluetoothService {
+  @override
+  Future<void> suspend(String key) async {}
+
+  @override
+  Future<void> resume(String key) async {}
+
   final records = StreamController<ClassicBtRecord>.broadcast();
 
   @override

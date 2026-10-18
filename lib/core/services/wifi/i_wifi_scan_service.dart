@@ -53,6 +53,13 @@ abstract interface class IWifiScanService {
 
   Future<void> stop(String owner);
 
+  /// Skips scans while [key] holds a pause (last results stay as they are).
+  /// Finder screens use this so Wi-Fi scans don't disturb BLE tracking.
+  Future<void> suspend(String key);
+
+  /// Releases [key]'s pause.
+  Future<void> resume(String key);
+
   Future<void> dispose();
 }
 

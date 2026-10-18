@@ -102,3 +102,9 @@
 - **What Happens**: `SessionModel ==` ignored new fields → trusting a device wouldn't notify listeners.
 - **How to Avoid**: When adding fields to a state model, add them to `==`/`hashCode`.
 - **Discovered**: 2026-10-18
+
+#### Classic BT inquiry starves BLE → finder/RF dropouts (seen live on Samsung A07)
+- **What Happens**: Walk finder targets went "not heard" and the RF meter read "0 transmitters / QUIET" every ~30 s.
+- **Why**: The dashboard keeps the scanner (and its classic discovery owner) alive; each ~12 s inquiry starves BLE.
+- **How to Avoid**: Finder screens (radar, walk, sweep) and the RF meter call `suspend(owner)` on classic + Wi-Fi services via their repositories and `resume` on stop. Background classic duty cycle: 12 s inquiry per ~57 s.
+- **Discovered**: 2026-10-18 (live test)
