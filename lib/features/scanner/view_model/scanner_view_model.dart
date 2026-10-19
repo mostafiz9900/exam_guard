@@ -68,7 +68,7 @@ class ScannerState {
   ScannerState({
     this.isScanning = false,
     this.devices = const [],
-    this._groups,
+    List<ScannedDeviceGroup>? groups,
     this.isRoomBoundaryMode = false,
     this.roomSizePreset = RoomSizePreset.medium,
     this.isBluetoothOff = false,
@@ -90,7 +90,8 @@ class ScannerState {
     this.isSelecting = false,
     this.selectedIds = const {},
     this.hasSeatLayout = false,
-  });
+    this.identityVersion = 0,
+  }) : _groups = groups;
 
   /// Most devices the walk finder follows at once.
   static const int maxWalkTargets = 5;
@@ -176,6 +177,11 @@ class ScannerState {
   /// The running exam has a seat layout, so "Seat sweep" is possible.
   final bool hasSeatLayout;
 
+  /// Increases whenever the scanner's idea of which addresses belong to one
+  /// physical device changes (an address rotated, or the members of a
+  /// group changed). Finders re-read [ScannerViewModel.aliasesOf] then.
+  final int identityVersion;
+
   bool get hasBaseline => baselineAt != null;
 
   int get unacknowledgedAlertCount =>
@@ -218,8 +224,9 @@ class ScannerState {
         if (selectedIds.contains(m.id)) m,
   ];
 
-  /// "Seat sweep" works for a live BLE signal in an exam with a seat map.
-  bool canSeatSweep(ScannedDeviceModel device) => hasSeatLayout && device.isBle;
+  /// "Seat sweep" needs a live BLE signal. Without a seat map the sweep
+  /// screen lets the inspector set one, so the option is always offered.
+  bool canSeatSweep(ScannedDeviceModel device) => device.isBle;
 
   /// The [count] strongest untrusted BLE devices still being heard (the
   /// strongest address of each group).
@@ -328,6 +335,7 @@ class ScannerState {
     bool? isSelecting,
     Set<String>? selectedIds,
     bool? hasSeatLayout,
+    int? identityVersion,
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
@@ -357,6 +365,7 @@ class ScannerState {
       isSelecting: isSelecting ?? this.isSelecting,
       selectedIds: selectedIds ?? this.selectedIds,
       hasSeatLayout: hasSeatLayout ?? this.hasSeatLayout,
+      identityVersion: identityVersion ?? this.identityVersion,
     );
   }
 }
@@ -438,6 +447,19 @@ class ScannerViewModel extends Notifier<ScannerState> {
   /// Every device that has raised an alert (or belongs to one that has).
   final Set<String> _alertedIds = {};
 
+  /// Rotated address → the first address of that device (its identity
+  /// root). Kept after the old address is forgotten, so a finder that
+  /// started on the old address still follows the device.
+  final Map<String, String> _identityRoot = {};
+
+  /// Oldest rotation records are dropped beyond this many.
+  static const int _maxIdentityRecords = 2000;
+
+  int _identityVersion = 0;
+
+  /// Member ids of every multi-address group at the last publish.
+  String _groupSignature = '';
+
   @override
   ScannerState build() {
     _repository = ref.watch(scannerRepositoryProvider);
@@ -469,7 +491,60 @@ class ScannerViewModel extends Notifier<ScannerState> {
       trustedIds: _trustedIds(),
       baselineAt: _baselineAt(),
       hasSeatLayout: _session?.hasSeatLayout ?? false,
+      identityVersion: _identityVersion,
     );
+  }
+
+  // ── Identity: addresses of one physical device ───────────────────────
+
+  String _rootOf(String id) => _identityRoot[id] ?? id;
+
+  /// Every address currently believed to be the same physical device as
+  /// [deviceId]: the addresses it rotated to (or from), every member of a
+  /// live group containing one of them, and [deviceId] itself. Never empty.
+  /// Re-read when [ScannerState.identityVersion] changes.
+  Set<String> aliasesOf(String deviceId) {
+    final ids = <String>{deviceId};
+    final groups = state.groups;
+    var grew = true;
+    while (grew) {
+      grew = false;
+      final roots = {for (final id in ids) _rootOf(id)};
+      for (final r in roots) {
+        if (ids.add(r)) grew = true;
+      }
+      for (final e in _identityRoot.entries) {
+        if (roots.contains(e.value) && ids.add(e.key)) grew = true;
+      }
+      for (final g in groups) {
+        if (!g.isGrouped || !g.members.any((m) => ids.contains(m.id))) {
+          continue;
+        }
+        for (final m in g.members) {
+          if (ids.add(m.id)) grew = true;
+        }
+      }
+    }
+    return ids;
+  }
+
+  /// [newId] is [oldId]'s device under a new random address.
+  void _recordRotation(String oldId, String newId) {
+    _identityRoot.remove(newId);
+    _identityRoot[newId] = _rootOf(oldId);
+    if (_identityRoot.length > _maxIdentityRecords) {
+      _identityRoot.remove(_identityRoot.keys.first);
+    }
+    _identityVersion++;
+  }
+
+  /// Cheap fingerprint of which addresses are grouped together.
+  static String _signatureOf(List<ScannedDeviceGroup> groups) {
+    final parts = [
+      for (final g in groups)
+        if (g.isGrouped) ([for (final m in g.members) m.id]..sort()).join(','),
+    ]..sort();
+    return parts.join('|');
   }
 
   // ── Session: trusted devices and baseline ────────────────────────────
@@ -766,7 +841,14 @@ class ScannerViewModel extends Notifier<ScannerState> {
         if (_live.containsKey(id)) id,
     };
 
+    final signature = _signatureOf(grouped);
+    if (signature != _groupSignature) {
+      _groupSignature = signature;
+      _identityVersion++;
+    }
+
     state = state.copyWith(
+      identityVersion: _identityVersion,
       devices: shown,
       groups: _ordered(grouped, now),
       staleIds: stale,
@@ -1142,6 +1224,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
           );
 
     if (rotatedFrom != null) {
+      _recordRotation(rotatedFrom.id, seen.id);
       _inheritFromRotated(rotatedFrom.id, seen.id);
       // The new address takes the old card's place in the list.
       final place = _appearance[rotatedFrom.id];

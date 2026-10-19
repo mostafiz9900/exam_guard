@@ -23,14 +23,19 @@ class WifiScanServiceImpl implements IWifiScanService {
   WifiScanServiceImpl(
     this._logger, {
     bool? isAndroid,
-    this._channel = const MethodChannel('exam_guard/wifi'),
-    this._permissions = const WifiPermissionGate(),
+    MethodChannel channel = const MethodChannel('exam_guard/wifi'),
+    WifiPermissionGate permissions = const WifiPermissionGate(),
     // 35 s keeps us under Android's 4-scans-per-2-minutes foreground limit
     // even after an app restart (the limit is counted per package).
-    this._scanInterval = const Duration(seconds: 35),
-    this._pollInterval = const Duration(seconds: 5),
-    this._clock = DateTime.now,
-  }) : _isAndroid = isAndroid ?? Platform.isAndroid {
+    Duration scanInterval = const Duration(seconds: 35),
+    Duration pollInterval = const Duration(seconds: 5),
+    DateTime Function() clock = DateTime.now,
+  }) : _isAndroid = isAndroid ?? Platform.isAndroid,
+       _channel = channel,
+       _permissions = permissions,
+       _scanInterval = scanInterval,
+       _pollInterval = pollInterval,
+       _clock = clock {
     _problem = _isAndroid ? null : WifiScanProblem.unsupported;
   }
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -15,7 +16,7 @@ import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/action_log/model/seat_map.dart';
 import 'package:exam_guard/features/radar/model/seat_sweep_models.dart';
 import 'package:exam_guard/features/radar/view/widgets/finder_issue_banner.dart';
-import 'package:exam_guard/features/radar/view/widgets/proximity_meter_card.dart';
+import 'package:exam_guard/features/radar/view/widgets/closeness_colors.dart';
 import 'package:exam_guard/features/radar/view_model/seat_sweep_view_model.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 
@@ -86,18 +87,19 @@ class SeatSweepScreen extends HookConsumerWidget {
     }
 
     final Widget body;
-    if (!state.hasLayout) {
-      body = _Message(
-        icon: Icons.grid_off_rounded,
-        title: 'sweep_no_layout_title'.tr(),
-        text: 'sweep_no_layout_text'.tr(),
-        onBack: () => context.popBack(),
-      );
-    } else if (device == null || !device.isBle) {
+    if (device == null || !device.isBle) {
       body = _Message(
         icon: Icons.bluetooth_disabled_rounded,
         title: 'sweep_no_target_title'.tr(),
         text: 'sweep_no_target_text'.tr(),
+        onBack: () => context.popBack(),
+      );
+    } else if (!state.hasLayout) {
+      body = _SeatLayoutForm(
+        errorKey: state.layoutErrorKey,
+        isSaving: state.isSavingLayout,
+        onChanged: notifier.clearLayoutError,
+        onSave: notifier.saveSeatLayout,
         onBack: () => context.popBack(),
       );
     } else {
@@ -166,6 +168,12 @@ class SeatSweepScreen extends HookConsumerWidget {
               packets: state.samplingPackets,
               onCancel: notifier.cancelSampling,
             )
+          else if (state.isNotHeard && state.issue == null)
+            _Notice(
+              key: const Key('sweep_not_heard_hint'),
+              text: 'sweep_not_heard_hint'.tr(),
+              isWarning: true,
+            )
           else if (state.noSignalSeat != null)
             _Notice(
               text: 'sweep_no_signal_here'.tr(
@@ -182,7 +190,10 @@ class SeatSweepScreen extends HookConsumerWidget {
             readings: state.readings,
             samplingSeat: state.samplingSeat,
             bestSeat: result?.bestSeat,
-            enabled: state.issue == null && state.samplingSeat == null,
+            enabled:
+                state.issue == null &&
+                state.samplingSeat == null &&
+                !state.isNotHeard,
             onTap: notifier.sampleSeat,
             onLongPress: notifier.clearSeat,
           ),
@@ -553,9 +564,10 @@ class _ResultCard extends StatelessWidget {
 }
 
 class _Notice extends StatelessWidget {
-  const _Notice({required this.text});
+  const _Notice({super.key, required this.text, this.isWarning = false});
 
   final String text;
+  final bool isWarning;
 
   @override
   Widget build(BuildContext context) {
@@ -563,12 +575,20 @@ class _Notice extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(AppDimens.spacingSmall),
       decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest,
+        color: isWarning
+            ? colors.errorContainer.withValues(alpha: 0.5)
+            : colors.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(AppDimens.radiusSmall),
       ),
       child: Row(
         children: [
-          Icon(Icons.info_outline_rounded, size: 18.w, color: colors.outline),
+          Icon(
+            isWarning
+                ? Icons.bluetooth_searching_rounded
+                : Icons.info_outline_rounded,
+            size: 18.w,
+            color: isWarning ? colors.error : colors.outline,
+          ),
           SizedBox(width: 8.w),
           Expanded(
             child: Text(text, style: Theme.of(context).textTheme.bodySmall),
@@ -621,6 +641,134 @@ class _Message extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The running exam has no seat layout: enter rows × columns here (saved
+/// to the exam) instead of leaving the screen.
+class _SeatLayoutForm extends HookWidget {
+  const _SeatLayoutForm({
+    required this.errorKey,
+    required this.isSaving,
+    required this.onChanged,
+    required this.onSave,
+    required this.onBack,
+  });
+
+  final String? errorKey;
+  final bool isSaving;
+  final VoidCallback onChanged;
+  final Future<bool> Function(String rows, String cols) onSave;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final rows = useTextEditingController();
+    final cols = useTextEditingController();
+    final error = errorKey?.tr(
+      args: {'min': '${SeatLayoutDraft.min}', 'max': '${SeatLayoutDraft.max}'},
+    );
+
+    Future<void> save() async {
+      FocusScope.of(context).unfocus();
+      await onSave(rows.text, cols.text);
+    }
+
+    Widget field(TextEditingController c, String label, String hint, Key key) =>
+        Expanded(
+          child: TextField(
+            key: key,
+            controller: c,
+            enabled: !isSaving,
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.next,
+            textAlign: TextAlign.center,
+            maxLength: 2,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (_) => onChanged(),
+            onSubmitted: (_) => save(),
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              isDense: true,
+              counterText: '',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
+              ),
+            ),
+          ),
+        );
+
+    return ListView(
+      padding: EdgeInsets.all(AppDimens.spacingLarge),
+      children: [
+        Icon(Icons.grid_view_rounded, size: 56.w, color: colors.outline),
+        SizedBox(height: 12.h),
+        Text(
+          'sweep_no_layout_title'.tr(),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleMedium,
+        ),
+        SizedBox(height: 8.h),
+        Text(
+          'sweep_layout_form_text'.tr(),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
+        ),
+        SizedBox(height: 16.h),
+        Row(
+          children: [
+            field(
+              rows,
+              'setup_seat_rows'.tr(),
+              '6',
+              const Key('sweep_seat_rows'),
+            ),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10.w),
+              child: Text(
+                '×',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ),
+            field(
+              cols,
+              'setup_seat_cols'.tr(),
+              '5',
+              const Key('sweep_seat_cols'),
+            ),
+          ],
+        ),
+        SizedBox(height: 6.h),
+        Text(
+          error ?? 'sweep_layout_saved_note'.tr(),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: error != null ? colors.error : colors.onSurfaceVariant,
+          ),
+        ),
+        SizedBox(height: 16.h),
+        FilledButton.icon(
+          key: const Key('sweep_layout_save'),
+          onPressed: isSaving ? null : save,
+          icon: isSaving
+              ? SizedBox(
+                  width: 16.w,
+                  height: 16.w,
+                  child: const CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.check_rounded),
+          label: Text('sweep_layout_set'.tr()),
+        ),
+        SizedBox(height: 8.h),
+        OutlinedButton(onPressed: onBack, child: Text('walk_go_back'.tr())),
+      ],
     );
   }
 }

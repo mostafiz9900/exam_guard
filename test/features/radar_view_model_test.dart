@@ -8,10 +8,11 @@ import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
 import 'package:exam_guard/features/radar/view_model/tracking_radar_view_model.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'radar/finder_fakes.dart' show FakeHaptics, FakeWakelock;
+import 'radar/finder_fakes.dart' show FakeHaptics, FakeScanner, FakeWakelock;
 
 class FakeBluetoothService implements IBluetoothService {
   final records = StreamController<BleScanRecord>.broadcast();
@@ -168,6 +169,7 @@ void main() {
     late FakeBluetoothService bluetooth;
     late FakeWakelock wakelock;
     late FakeHaptics haptics;
+    late FakeScanner scanner;
     late ProviderContainer container;
 
     ProviderContainer create() {
@@ -176,6 +178,7 @@ void main() {
           bluetoothServiceProvider.overrideWithValue(bluetooth),
           wakelockServiceProvider.overrideWithValue(wakelock),
           hapticServiceProvider.overrideWithValue(haptics),
+          scannerViewModelProvider.overrideWith(() => scanner),
         ],
       );
       c.listen(trackingRadarViewModelProvider, (_, _) {});
@@ -186,6 +189,7 @@ void main() {
       bluetooth = FakeBluetoothService();
       wakelock = FakeWakelock();
       haptics = FakeHaptics();
+      scanner = FakeScanner();
       container = create();
     });
 
@@ -340,6 +344,24 @@ void main() {
         container.read(trackingRadarViewModelProvider).errorKey,
         'radar_err_scan_failed',
       );
+    });
+
+    test('hears the target on a rotated address', () async {
+      await container
+          .read(trackingRadarViewModelProvider.notifier)
+          .setTargetDevice(target());
+      bluetooth.records.add(record('CC:DD', -50));
+      await pumpEventQueue();
+      expect(container.read(trackingRadarViewModelProvider).rssi, isNull);
+
+      scanner.changeIdentity('AA:BB', {'AA:BB', 'CC:DD'});
+      await pumpEventQueue();
+      bluetooth.records.add(record('CC:DD', -50));
+      await pumpEventQueue();
+      final state = container.read(trackingRadarViewModelProvider);
+      expect(state.rssi, -50);
+      expect(state.hasLiveSignal, isTrue);
+      expect(state.device!.id, 'AA:BB');
     });
   });
 }

@@ -303,6 +303,94 @@ void main() {
     expect(devices.map((d) => d.id), ['22:22']);
   });
 
+  group('identity (aliasesOf / identityVersion)', () {
+    ScannerViewModel vm() => container.read(scannerViewModelProvider.notifier);
+    int version() => container.read(scannerViewModelProvider).identityVersion;
+
+    test('a rotated address is an alias of the old one and back', () async {
+      final tenSecondsAgo = DateTime.now().subtract(
+        const Duration(seconds: 10),
+      );
+      bluetooth.records.add(
+        record('11:11', -60, name: 'AirPods Pro', at: tenSecondsAgo),
+      );
+      await pumpEventQueue();
+      expect(vm().aliasesOf('11:11'), {'11:11'});
+      final before = version();
+
+      bluetooth.records.add(record('22:22', -62, name: 'AirPods Pro'));
+      await pumpEventQueue();
+
+      expect(version(), greaterThan(before));
+      // The old address is gone from the list but still resolves.
+      expect(vm().aliasesOf('11:11'), {'11:11', '22:22'});
+      expect(vm().aliasesOf('22:22'), {'11:11', '22:22'});
+      expect(vm().aliasesOf('99:99'), {'99:99'});
+    });
+
+    test('a second rotation keeps the chain', () async {
+      final t = DateTime.now();
+      bluetooth.records.add(
+        record(
+          '11:11',
+          -60,
+          name: 'Buds',
+          at: t.subtract(const Duration(seconds: 20)),
+        ),
+      );
+      await pumpEventQueue();
+      bluetooth.records.add(
+        record(
+          '22:22',
+          -60,
+          name: 'Buds',
+          at: t.subtract(const Duration(seconds: 10)),
+        ),
+      );
+      await pumpEventQueue();
+      bluetooth.records.add(record('33:33', -60, name: 'Buds'));
+      await pumpEventQueue();
+      expect(vm().aliasesOf('11:11'), {'11:11', '22:22', '33:33'});
+    });
+
+    test('members of a group are aliases of each other', () async {
+      const apple = {
+        0x004C: [0x10, 0x05, 0x01],
+      };
+      final t = DateTime.now();
+      bluetooth.records.add(
+        record('B1', -60, name: '', at: t, manufacturerData: apple),
+      );
+      await pumpEventQueue();
+      final single = version();
+      expect(vm().aliasesOf('B1'), {'B1'});
+
+      bluetooth.records.add(
+        record('B2', -61, name: '', at: t, manufacturerData: apple),
+      );
+      await pumpEventQueue();
+      expect(
+        container
+            .read(scannerViewModelProvider)
+            .groups
+            .where((g) => g.isGrouped),
+        hasLength(1),
+      );
+      expect(version(), greaterThan(single));
+      expect(vm().aliasesOf('B1'), {'B1', 'B2'});
+      expect(vm().aliasesOf('B2'), {'B1', 'B2'});
+
+      // A value-only update does not change identity.
+      final grouped = version();
+      bluetooth.records.add(
+        record('B1', -59, name: '', at: t, manufacturerData: apple),
+      );
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(version(), grouped);
+    });
+  });
+
   test(
     'two identical devices that are both advertising stay separate',
     () async {

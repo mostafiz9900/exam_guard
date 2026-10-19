@@ -19,8 +19,9 @@ class PhotoServiceImpl implements IPhotoService {
     this._logger, {
     CameraCapture? capture,
     Future<Directory> Function()? documentsDirectory,
-    this._clock = DateTime.now,
-  }) : _capture = capture ?? _pickFromCamera,
+    DateTime Function() clock = DateTime.now,
+  }) : _clock = clock,
+       _capture = capture ?? _pickFromCamera,
        _documentsDirectory =
            documentsDirectory ?? getApplicationDocumentsDirectory;
 

@@ -26,9 +26,10 @@ class RadarRepository {
     this._bluetooth,
     this._permissions,
     this._wakelock, {
-    this._classic,
-    this._wifi,
-  });
+    IClassicBluetoothService? classic,
+    IWifiScanService? wifi,
+  }) : _classic = classic,
+       _wifi = wifi;
 
   static const String radarOwner = 'tracking_radar';
   static const String walkFinderOwner = 'walk_finder';
@@ -71,6 +72,13 @@ class RadarRepository {
 
   /// Opens the system Location settings.
   Future<bool> openLocationSettings() => _permissions.openLocationSettings();
+
+  /// Every BLE advertisement heard while tracking, from any address. The
+  /// finders filter it by the target's current aliases, because phones and
+  /// earbuds advertise from several random addresses and rotate them.
+  Stream<RadarSignal> watchAll() => _bluetooth.scanRecords.map(
+    (r) => RadarSignal(rssi: r.rssi, timestamp: r.timestamp, deviceId: r.id),
+  );
 
   /// Every advertisement from [deviceId] while tracking.
   Stream<RadarSignal> watchDevice(String deviceId) => watchDevices({deviceId});

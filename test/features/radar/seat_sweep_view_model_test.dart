@@ -6,6 +6,7 @@ import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/wakelock/i_wakelock_service.dart';
 import 'package:exam_guard/features/radar/model/seat_sweep_models.dart';
 import 'package:exam_guard/features/radar/view_model/seat_sweep_view_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 
@@ -15,9 +16,18 @@ class _FakeSession extends SessionViewModel {
   _FakeSession(this._session);
 
   final SessionModel? _session;
+  final layouts = <(int, int)>[];
 
   @override
   SessionModel? build() => _session;
+
+  @override
+  Future<void> setSeatLayout({required int rows, required int cols}) async {
+    final current = state;
+    if (current == null) throw const NoActiveSessionException();
+    layouts.add((rows, cols));
+    state = current.copyWith(seatRows: rows, seatCols: cols);
+  }
 }
 
 SessionModel session({int? rows, int? cols}) => SessionModel(
@@ -35,6 +45,8 @@ void main() {
 
   late FakeFinderBluetooth bluetooth;
   late FakeWakelock wakelock;
+  late FakeScanner scanner;
+  _FakeSession? fakeSession;
   late ProviderContainer container;
 
   void create(SessionModel? s) {
@@ -43,7 +55,10 @@ void main() {
         bluetoothServiceProvider.overrideWithValue(bluetooth),
         wakelockServiceProvider.overrideWithValue(wakelock),
         hapticServiceProvider.overrideWithValue(FakeHaptics()),
-        sessionViewModelProvider.overrideWith(() => _FakeSession(s)),
+        scannerViewModelProvider.overrideWith(() => scanner),
+        sessionViewModelProvider.overrideWith(
+          () => fakeSession = _FakeSession(s),
+        ),
         seatSampleDurationProvider.overrideWithValue(
           const Duration(milliseconds: 300),
         ),
@@ -59,6 +74,7 @@ void main() {
   setUp(() {
     bluetooth = FakeFinderBluetooth();
     wakelock = FakeWakelock();
+    scanner = FakeScanner();
   });
 
   tearDown(() => container.dispose());
@@ -168,5 +184,99 @@ void main() {
     await pumpEventQueue();
     notifier().sampleSeat('A1');
     expect(state().isSampling, isFalse);
+  });
+
+  group('follows every address of the target', () {
+    Future<void> hear(String id, int rssi, int count) async {
+      for (var i = 0; i < count; i++) {
+        bluetooth.records.add(bleRecord(id, rssi));
+      }
+      await pumpEventQueue();
+    }
+
+    test('samples packets from a sibling address of the device', () async {
+      scanner.aliases['AA'] = {'AA', 'BB'};
+      create(session(rows: 2, cols: 2));
+      await notifier().setTarget(bleDevice('AA'));
+
+      notifier().sampleSeat('A1');
+      await hear('BB', -55, 4);
+      await hear('ZZ', -40, 5); // another device: ignored
+      notifier().finishSample();
+
+      final reading = state().readings['A1']!;
+      expect(reading.hasSignal, isTrue);
+      expect(reading.packets, 4);
+      expect(reading.averageRssi, closeTo(-55, 0.01));
+    });
+
+    test('follows a rotated address learned while sweeping', () async {
+      create(session(rows: 2, cols: 2));
+      await notifier().setTarget(bleDevice('AA'));
+
+      scanner.changeIdentity('AA', {'AA', 'CC'});
+      await pumpEventQueue();
+      notifier().sampleSeat('B2');
+      await hear('CC', -58, 5);
+      notifier().finishSample();
+
+      expect(state().readings['B2']!.packets, 5);
+      expect(state().noSignalSeat, isNull);
+    });
+  });
+
+  group('no seat layout in the running exam', () {
+    test('the layout can be set here; invalid input is rejected', () async {
+      create(session());
+      await notifier().setTarget(bleDevice('AA'));
+      expect(state().hasLayout, isFalse);
+
+      expect(await notifier().saveSeatLayout('', '5'), isFalse);
+      expect(state().layoutErrorKey, 'setup_seat_err_both');
+      notifier().clearLayoutError();
+      expect(state().layoutErrorKey, isNull);
+      for (final (r, c) in [('0', '5'), ('6', '31'), ('a', '5')]) {
+        expect(await notifier().saveSeatLayout(r, c), isFalse);
+        expect(state().layoutErrorKey, 'setup_seat_err_range');
+      }
+      expect(fakeSession!.layouts, isEmpty);
+      expect(bluetooth.owners, isEmpty);
+
+      expect(await notifier().saveSeatLayout(' 6 ', '5'), isTrue);
+      expect(fakeSession!.layouts, [(6, 5)]);
+      expect(container.read(sessionViewModelProvider)!.seatRows, 6);
+      expect((state().rows, state().cols), (6, 5));
+      expect(state().hasLayout, isTrue);
+      expect(state().layoutErrorKey, isNull);
+      // The sweep starts at once.
+      expect(bluetooth.owners, {'seat_sweep'});
+    });
+
+    test('a layout that cannot be saved is reported', () async {
+      create(null);
+      await notifier().setTarget(bleDevice('AA'));
+      expect(await notifier().saveSeatLayout('6', '5'), isFalse);
+      expect(state().layoutErrorKey, 'sweep_layout_save_failed');
+      expect(state().hasLayout, isFalse);
+      expect(state().isSavingLayout, isFalse);
+    });
+  });
+
+  test('a target not heard for 10 s says so and blocks sampling', () async {
+    create(session(rows: 2, cols: 2));
+    await notifier().setTarget(bleDevice('AA'));
+    notifier().checkHeard(DateTime.now().add(const Duration(seconds: 5)));
+    expect(state().isNotHeard, isFalse);
+
+    notifier().checkHeard(DateTime.now().add(const Duration(seconds: 11)));
+    expect(state().isNotHeard, isTrue);
+    notifier().sampleSeat('A1');
+    expect(state().isSampling, isFalse);
+
+    bluetooth.records.add(bleRecord('AA', -60));
+    await pumpEventQueue();
+    expect(state().isNotHeard, isFalse);
+    notifier().sampleSeat('A1');
+    expect(state().isSampling, isTrue);
   });
 }

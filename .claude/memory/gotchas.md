@@ -108,3 +108,20 @@
 - **Why**: The dashboard keeps the scanner (and its classic discovery owner) alive; each ~12 s inquiry starves BLE.
 - **How to Avoid**: Finder screens (radar, walk, sweep) and the RF meter call `suspend(owner)` on classic + Wi-Fi services via their repositories and `resume` on stop. Background classic duty cycle: 12 s inquiry per ~57 s.
 - **Discovered**: 2026-10-18 (live test)
+
+#### Finders — never listen to one fixed BLE address
+- **What Happens**: Radar stuck on "Acquiring signal…", seat sweep read "No signal" at every seat (Samsung A07 live test).
+- **Why**: Phones/earbuds advertise from several random addresses at once (scanner groups them) and rotate them every few minutes; `watchDevice(id)` heard only the tapped address.
+- **How to Avoid**: Finders subscribe to `RadarRepository.watchAll()` and filter by `FinderAliases.of(id)` (→ `ScannerViewModel.aliasesOf`), refreshed when `ScannerState.identityVersion` changes. Smoothing/alarms stay per target, not per address.
+- **Discovered**: 2026-10-18 (live test)
+
+#### Tests — don't wait real seconds for the radar's "signal lost"
+- **What Happens**: A screen test using `tester.runAsync(() => Future.delayed(5 s))` hung until the 10-min timeout under full-suite load.
+- **Why**: `TrackingRadarViewModel` decides "lost" from `DateTime.now()` (wall clock), so fake time can't trigger it.
+- **How to Avoid**: For screen rendering, override `trackingRadarViewModelProvider` with a subclass whose `build()` returns a fixed state (see `_FixedRadar` in test/features/radar/tracking_radar_screen_test.dart).
+- **Discovered**: 2026-10-18
+
+#### Theme text styles scale with width in landscape
+- **What Happens**: `bodySmall` (12.sp in AppTheme) rendered ~25 px at 800×360; extra `.sp` overrides doubled it again.
+- **How to Avoid**: For small captions on screens that must work in landscape, prefer M3 `label*` styles; never add `fontSize: x.sp` on top of a theme style. `.r` shrinks in landscape — radar widgets use `.rc` (radar_sizes.dart, floor 90 %).
+- **Discovered**: 2026-10-18

@@ -524,9 +524,9 @@ void main() {
       });
     });
 
-    test('seat sweep needs a BLE device and a seat layout', () {
+    test('seat sweep is offered for BLE devices, with or without a layout', () {
       final ble = dev('A');
-      expect(ScannerState().canSeatSweep(ble), isFalse);
+      expect(ScannerState().canSeatSweep(ble), isTrue);
       expect(ScannerState(hasSeatLayout: true).canSeatSweep(ble), isTrue);
       expect(
         ScannerState(hasSeatLayout: true)

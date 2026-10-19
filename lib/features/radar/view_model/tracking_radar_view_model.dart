@@ -10,6 +10,7 @@ import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/features/radar/model/proximity_meter.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/repository/radar_repository.dart';
+import 'package:exam_guard/features/radar/view_model/finder_aliases.dart';
 import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 
@@ -153,7 +154,8 @@ class TrackingRadarState {
 }
 
 /// Live hot/cold tracking of one BLE device. Listens to every advertisement
-/// from the target; distance, threat and trend come from smoothed RSSI.
+/// from any of the target's addresses (phones use several and rotate them);
+/// distance, threat and trend come from the smoothed RSSI.
 class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   static const Duration signalLostAfter = Duration(seconds: 5);
   static const int _historyLength = 20;
@@ -166,6 +168,10 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
   late GeigerBuzzerService _buzzer;
   late AppLogger _logger;
   late IHapticService _haptics;
+  late FinderAliases _aliases;
+
+  /// Addresses the target is heard on (see [FinderAliases]).
+  Set<String> _targetIds = const {};
   final RssiTrendFilter _filter = RssiTrendFilter();
   final PeakHold _peak = PeakHold();
   final HapticPulseLimiter _pulses = HapticPulseLimiter();
@@ -184,6 +190,7 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _buzzer = ref.watch(geigerBuzzerProvider);
     _logger = ref.watch(appLoggerProvider);
     _haptics = ref.watch(hapticServiceProvider);
+    _aliases = FinderAliases(ref, _logger)..watch(_refreshAliases);
     // Keep the display on while the radar is open; released on dispose.
     _repository.keepScreenOn(RadarRepository.radarOwner);
     ref.onDispose(_stop);
@@ -227,9 +234,11 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
     _resetFilter();
     _lastPacketAt = DateTime.now();
 
+    _targetIds = _aliases.of(device.id);
     await _sub?.cancel();
     _sub = _repository
-        .watchDevice(device.id)
+        .watchAll()
+        .where((s) => _targetIds.contains(s.deviceId))
         .listen(
           (s) => updateDeviceSignal(s.rssi, s.timestamp),
           onError: (Object e, StackTrace st) {
@@ -261,6 +270,13 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
       return;
     }
     _watchScanProblem();
+  }
+
+  /// The scanner learned new addresses of the target (rotation, group).
+  void _refreshAliases() {
+    final device = state.device;
+    if (!ref.mounted || device == null) return;
+    _targetIds = _aliases.of(device.id);
   }
 
   /// Follows scan problems (Location off) while tracking. Re-subscribed on

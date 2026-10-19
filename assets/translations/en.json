@@ -596,5 +596,10 @@
   "walk_tips": "Put the phone in a pocket (the screen stays on) and walk slowly along each aisle. It vibrates and beeps when a chosen device is close.",
   "walk_title": "Walk finder",
   "walk_turn_on_bluetooth": "Turn on Bluetooth",
-  "walk_very_close": "Very close — check nearby desks"
+  "walk_very_close": "Very close — check nearby desks",
+  "sweep_layout_form_text": "Enter the rows and columns of desks in this room to sweep seat by seat.",
+  "sweep_layout_saved_note": "The layout is saved for this exam.",
+  "sweep_layout_set": "Set seat layout",
+  "sweep_layout_save_failed": "Couldn't save the seat layout. Is the exam still running?",
+  "sweep_not_heard_hint": "Device not heard right now — move closer or check it's switched on."
 }

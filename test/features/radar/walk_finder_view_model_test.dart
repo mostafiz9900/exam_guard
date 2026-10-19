@@ -7,7 +7,7 @@ import 'package:exam_guard/core/services/wakelock/i_wakelock_service.dart';
 import 'package:exam_guard/features/radar/model/finder_scan_issue.dart';
 import 'package:exam_guard/features/radar/model/walk_finder_models.dart';
 import 'package:exam_guard/features/radar/view_model/walk_finder_view_model.dart';
-import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 
 import 'finder_fakes.dart';
 
@@ -17,6 +17,7 @@ void main() {
   late FakeFinderBluetooth bluetooth;
   late FakeWakelock wakelock;
   late FakeHaptics haptics;
+  late FakeScanner scanner;
   late ProviderContainer container;
 
   WalkFinderViewModel notifier() =>
@@ -27,11 +28,13 @@ void main() {
     bluetooth = FakeFinderBluetooth();
     wakelock = FakeWakelock();
     haptics = FakeHaptics();
+    scanner = FakeScanner();
     container = ProviderContainer(
       overrides: [
         bluetoothServiceProvider.overrideWithValue(bluetooth),
         wakelockServiceProvider.overrideWithValue(wakelock),
         hapticServiceProvider.overrideWithValue(haptics),
+        scannerViewModelProvider.overrideWith(() => scanner),
       ],
     );
     container.listen(walkFinderViewModelProvider, (_, _) {});
@@ -59,6 +62,7 @@ void main() {
         bluetoothServiceProvider.overrideWithValue(bluetooth),
         wakelockServiceProvider.overrideWithValue(wakelock),
         hapticServiceProvider.overrideWithValue(haptics),
+        scannerViewModelProvider.overrideWith(() => scanner),
       ],
     );
   });
@@ -192,4 +196,32 @@ void main() {
     expect(state().alertCount, 1);
     expect(haptics.alerts, 1);
   });
+
+  test(
+    'packets from sibling and rotated addresses go to their target',
+    () async {
+      scanner.aliases['AA'] = {'AA', 'A2'};
+      notifier().setTargets([bleDevice('AA'), bleDevice('BB')]);
+      await notifier().start();
+
+      for (var i = 0; i < 5; i++) {
+        bluetooth.records.add(bleRecord('A2', -60));
+      }
+      bluetooth.records.add(bleRecord('ZZ', -40)); // not a target
+      await pumpEventQueue();
+      WalkTarget target(String id) =>
+          state().targets.firstWhere((t) => t.device.id == id);
+      expect(target('AA').lastHeard, isNotNull);
+      expect(target('AA').smoothedRssi, closeTo(-60, 0.01));
+      expect(target('BB').lastHeard, isNull);
+
+      // BB's address rotated while walking.
+      scanner.changeIdentity('BB', {'BB', 'B9'});
+      await pumpEventQueue();
+      bluetooth.records.add(bleRecord('B9', -70));
+      await pumpEventQueue();
+      expect(target('BB').smoothedRssi, closeTo(-70, 0.01));
+      expect(target('AA').smoothedRssi, closeTo(-60, 0.01));
+    },
+  );
 }

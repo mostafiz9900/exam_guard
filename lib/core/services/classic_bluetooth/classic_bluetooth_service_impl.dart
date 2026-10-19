@@ -23,12 +23,15 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
   ClassicBluetoothServiceImpl(
     this._logger, {
     bool? isAndroid,
-    this._channel = const EventChannel('exam_guard/classic_bt'),
+    EventChannel channel = const EventChannel('exam_guard/classic_bt'),
     // ~12 s inquiry per ~57 s: classic earpieces still show within a
     // minute, while BLE scanning (alerts, live list) keeps most airtime.
-    this._pause = const Duration(seconds: 45),
-    this._cycleTimeout = const Duration(seconds: 20),
-  }) : _isAndroid = isAndroid ?? Platform.isAndroid;
+    Duration pause = const Duration(seconds: 45),
+    Duration cycleTimeout = const Duration(seconds: 20),
+  }) : _isAndroid = isAndroid ?? Platform.isAndroid,
+       _channel = channel,
+       _pause = pause,
+       _cycleTimeout = cycleTimeout;
 
   final AppLogger _logger;
   final bool _isAndroid;

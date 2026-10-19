@@ -15,6 +15,7 @@ import 'package:exam_guard/features/radar/view/tracking_radar_screen.dart';
 import 'package:exam_guard/features/radar/view/walk_finder_screen.dart';
 import 'package:exam_guard/features/radar/view_model/seat_sweep_view_model.dart';
 import 'package:exam_guard/features/radar/view_model/walk_finder_view_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 
@@ -28,6 +29,10 @@ class _KeysOnlyLoader extends AssetLoader {
 }
 
 class _FakeSession extends SessionViewModel {
+  _FakeSession({this.withLayout = true});
+
+  final bool withLayout;
+
   @override
   SessionModel? build() => SessionModel(
     id: 's1',
@@ -35,16 +40,22 @@ class _FakeSession extends SessionViewModel {
     teacherName: 'T',
     roomNumber: '12',
     startTime: DateTime(2026),
-    seatRows: 6,
-    seatCols: 8,
+    seatRows: withLayout ? 6 : null,
+    seatCols: withLayout ? 8 : null,
   );
+
+  @override
+  Future<void> setSeatLayout({required int rows, required int cols}) async {
+    state = state!.copyWith(seatRows: rows, seatCols: cols);
+  }
 }
 
 Future<ProviderContainer> _pump(
   WidgetTester tester,
   Widget screen,
-  FakeFinderBluetooth bluetooth,
-) async {
+  FakeFinderBluetooth bluetooth, {
+  bool withLayout = true,
+}) async {
   rootBundle.clear();
   tester.view.physicalSize = const Size(360, 800);
   tester.view.devicePixelRatio = 1;
@@ -63,7 +74,10 @@ Future<ProviderContainer> _pump(
           bluetoothServiceProvider.overrideWithValue(bluetooth),
           wakelockServiceProvider.overrideWithValue(FakeWakelock()),
           hapticServiceProvider.overrideWithValue(FakeHaptics()),
-          sessionViewModelProvider.overrideWith(_FakeSession.new),
+          scannerViewModelProvider.overrideWith(FakeScanner.new),
+          sessionViewModelProvider.overrideWith(
+            () => _FakeSession(withLayout: withLayout),
+          ),
         ],
         child: Builder(
           builder: (context) => AppScreenSize(
@@ -147,11 +161,63 @@ void main() {
     await _unmount(tester);
   });
 
+  testWidgets('seat sweep without a layout lets the layout be set here', (
+    tester,
+  ) async {
+    final bluetooth = FakeFinderBluetooth();
+    final screen = SeatSweepScreen(targetDevice: bleDevice('AA'));
+    final container = await _pump(tester, screen, bluetooth, withLayout: false);
+    expect(find.text('sweep_no_layout_title'), findsOneWidget);
+    expect(find.text('sweep_layout_saved_note'), findsOneWidget);
+    expect(find.text('C4'), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('sweep_seat_rows')), '4');
+    await tester.tap(find.byKey(const Key('sweep_layout_save')));
+    await tester.pump();
+    expect(find.text('setup_seat_err_both'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('sweep_seat_cols')), '5');
+    await tester.tap(find.byKey(const Key('sweep_layout_save')));
+    await tester.pump();
+    await tester.pump();
+    expect(container.read(sessionViewModelProvider)!.seatCols, 5);
+    expect(find.text('C4'), findsOneWidget);
+    expect(bluetooth.owners, {'seat_sweep'});
+
+    // Silent for 10 s: the hint replaces futile sampling.
+    container
+        .read(seatSweepViewModelProvider.notifier)
+        .checkHeard(DateTime.now().add(const Duration(seconds: 11)));
+    await tester.pump();
+    expect(find.byKey(const Key('sweep_not_heard_hint')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await _unmount(tester);
+  });
+
   testWidgets('radar shows the closeness meter', (tester) async {
     final bluetooth = FakeFinderBluetooth();
     final screen = TrackingRadarScreen(targetDevice: bleDevice('AA'));
     await _pump(tester, screen, bluetooth);
-    expect(find.text('--'), findsWidgets);
+    // Acquiring: status in the gauge, no number yet.
+    expect(find.text('radar_acquiring_center'), findsOneWidget);
+    expect(find.byKey(const Key('radar_percent')), findsNothing);
+    expect(find.byKey(const Key('radar_find_seat')), findsOneWidget);
+    expect(find.byKey(const Key('radar_log_incident')), findsOneWidget);
+
+    final now = DateTime.now();
+    for (var i = 0; i < 10; i++) {
+      bluetooth.records.add(
+        bleRecord('AA', -60, now.add(Duration(milliseconds: 100 * i))),
+      );
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byKey(const Key('radar_percent')), findsOneWidget);
+    expect(find.text('radar_status_live'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await _unmount(tester);
   });

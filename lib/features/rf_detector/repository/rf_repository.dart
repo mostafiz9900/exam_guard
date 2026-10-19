@@ -31,9 +31,10 @@ class RfRepository {
   RfRepository(
     this._bluetooth,
     this._permissions, {
-    this._classic,
-    this._wifi,
-  });
+    IClassicBluetoothService? classic,
+    IWifiScanService? wifi,
+  }) : _classic = classic,
+       _wifi = wifi;
 
   static const String _scanOwner = 'rf_detector';
 

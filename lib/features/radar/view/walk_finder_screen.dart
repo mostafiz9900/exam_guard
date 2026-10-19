@@ -9,7 +9,7 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/features/radar/model/walk_finder_models.dart';
 import 'package:exam_guard/features/radar/view/widgets/finder_issue_banner.dart';
-import 'package:exam_guard/features/radar/view/widgets/proximity_meter_card.dart';
+import 'package:exam_guard/features/radar/view/widgets/closeness_colors.dart';
 import 'package:exam_guard/features/radar/view_model/walk_finder_view_model.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 

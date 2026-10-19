@@ -4,6 +4,7 @@ import 'package:exam_guard/core/services/audio/haptic_service.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/wakelock/i_wakelock_service.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 
 class FakeFinderBluetooth implements IBluetoothService {
   final records = StreamController<BleScanRecord>.broadcast();
@@ -100,3 +101,27 @@ ScannedDeviceModel bleDevice(
   firstSeen: DateTime(2026),
   transport: transport,
 );
+
+/// Scanner stand-in for the finders: no scanning, configurable aliases.
+class FakeScanner extends ScannerViewModel {
+  FakeScanner([Map<String, Set<String>>? aliases]) : aliases = aliases ?? {};
+
+  /// Device id → every address of that device.
+  final Map<String, Set<String>> aliases;
+  final asked = <String>[];
+
+  @override
+  ScannerState build() => ScannerState();
+
+  @override
+  Set<String> aliasesOf(String deviceId) {
+    asked.add(deviceId);
+    return {...?aliases[deviceId], deviceId};
+  }
+
+  /// The scanner learned something new about addresses (rotation, group).
+  void changeIdentity(String deviceId, Set<String> addresses) {
+    aliases[deviceId] = addresses;
+    state = state.copyWith(identityVersion: state.identityVersion + 1);
+  }
+}

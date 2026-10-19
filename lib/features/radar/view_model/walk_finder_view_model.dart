@@ -9,6 +9,7 @@ import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/features/radar/model/finder_scan_issue.dart';
 import 'package:exam_guard/features/radar/model/walk_finder_models.dart';
 import 'package:exam_guard/features/radar/repository/radar_repository.dart';
+import 'package:exam_guard/features/radar/view_model/finder_aliases.dart';
 import 'package:exam_guard/features/radar/view_model/finder_scan_monitor.dart';
 import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
@@ -100,6 +101,11 @@ class WalkFinderViewModel extends Notifier<WalkFinderState> {
   late IHapticService _haptics;
   late AppLogger _logger;
   late FinderScanMonitor _monitor;
+  late FinderAliases _aliases;
+
+  /// Address → the target it belongs to. A target is heard on all its
+  /// addresses (phones use several and rotate them; see [FinderAliases]).
+  Map<String, String> _targetOf = const {};
 
   final Map<String, RssiTrendFilter> _filters = {};
   final Map<String, ZoneAlarm> _alarms = {};
@@ -113,6 +119,7 @@ class WalkFinderViewModel extends Notifier<WalkFinderState> {
     _haptics = ref.watch(hapticServiceProvider);
     _logger = ref.watch(appLoggerProvider);
     _monitor = FinderScanMonitor(_repository, _logger, _onIssue);
+    _aliases = FinderAliases(ref, _logger)..watch(_refreshAliases);
     _repository.keepScreenOn(RadarRepository.walkFinderOwner);
     ref.onDispose(_dispose);
     return WalkFinderState(now: DateTime.now());
@@ -150,9 +157,11 @@ class WalkFinderViewModel extends Notifier<WalkFinderState> {
       targets: [for (final t in state.targets) WalkTarget(device: t.device)],
     );
 
+    _refreshAliases();
     await _sub?.cancel();
     _sub = _repository
-        .watchDevices({for (final t in state.targets) t.device.id})
+        .watchAll()
+        .where((s) => _targetOf.containsKey(s.deviceId))
         .listen(
           (s) => onSignal(s.deviceId, s.rssi, s.timestamp),
           onError: (Object e, StackTrace st) {
@@ -204,10 +213,29 @@ class WalkFinderViewModel extends Notifier<WalkFinderState> {
     }
   }
 
-  /// One advertisement of a target (public for tests).
+  /// Maps every address of every target to that target. An address
+  /// claimed by two targets (the same device chosen twice) goes to the
+  /// first. Smoothing and alarms stay per target, not per address.
+  void _refreshAliases() {
+    if (!ref.mounted) return;
+    final map = <String, String>{};
+    for (final t in state.targets) {
+      map.putIfAbsent(t.device.id, () => t.device.id);
+    }
+    for (final t in state.targets) {
+      for (final id in _aliases.of(t.device.id)) {
+        map.putIfAbsent(id, () => t.device.id);
+      }
+    }
+    _targetOf = map;
+  }
+
+  /// One advertisement from [address] (a target's id or one of its other
+  /// addresses; public for tests).
   @visibleForTesting
-  void onSignal(String deviceId, int rssi, DateTime at) {
+  void onSignal(String address, int rssi, DateTime at) {
     if (!ref.mounted || !state.isRunning) return;
+    final deviceId = _targetOf[address] ?? address;
     final filter = _filters[deviceId];
     final alarm = _alarms[deviceId];
     if (filter == null || alarm == null) return;
