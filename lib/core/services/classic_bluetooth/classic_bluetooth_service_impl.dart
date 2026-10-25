@@ -108,8 +108,7 @@ class ClassicBluetoothServiceImpl implements IClassicBluetoothService {
     if (wake != null && !wake.isCompleted) wake.complete();
   }
 
-  bool get _active =>
-      _owners.isNotEmpty && _suspenders.isEmpty && !_disposed;
+  bool get _active => _owners.isNotEmpty && _suspenders.isEmpty && !_disposed;
 
   Future<void> _runLoop() async {
     try {

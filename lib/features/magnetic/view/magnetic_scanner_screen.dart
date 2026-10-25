@@ -250,6 +250,7 @@ class MagneticScannerScreen extends HookConsumerWidget {
 
                     if (isUnavailable)
                       _NoSensorCard(
+                        onRetry: notifier.startScanning,
                         onOpenScanner: () => context.pushTo(AppRoute.scanner),
                       )
                     else ...[
@@ -665,8 +666,10 @@ class MagneticScannerScreen extends HookConsumerWidget {
 /// Shown instead of the gauge and controls when the phone has no
 /// magnetometer: nothing on this screen can work, so say so plainly.
 class _NoSensorCard extends StatelessWidget {
-  const _NoSensorCard({required this.onOpenScanner});
+  const _NoSensorCard({required this.onRetry, required this.onOpenScanner});
 
+  /// A stream error stops the sensor; this restarts it.
+  final VoidCallback onRetry;
   final VoidCallback onOpenScanner;
 
   @override
@@ -715,10 +718,22 @@ class _NoSensorCard extends StatelessWidget {
               ),
             ),
             SizedBox(height: AppDimens.spacingLarge),
-            OutlinedButton.icon(
-              onPressed: onOpenScanner,
-              icon: const Icon(Icons.cell_wifi_rounded),
-              label: Text('open_scanner'.tr()),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: AppDimens.spacingSmall,
+              runSpacing: AppDimens.spacingSmall,
+              children: [
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text('mag_retry'.tr()),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onOpenScanner,
+                  icon: const Icon(Icons.cell_wifi_rounded),
+                  label: Text('open_scanner'.tr()),
+                ),
+              ],
             ),
           ],
         ),

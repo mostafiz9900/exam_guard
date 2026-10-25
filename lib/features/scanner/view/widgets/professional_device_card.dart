@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 
+import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
@@ -318,7 +319,12 @@ class ProfessionalDeviceCard extends HookWidget {
                             ),
                             SizedBox(width: 2.w),
                             Text(
-                              '${device.rssi} dBm',
+                              device.isBle
+                                  ? approxDistanceText(
+                                      device.rssi,
+                                      txPower: device.txPower,
+                                    )
+                                  : '${device.rssi} dBm',
                               style: textTheme.labelLarge?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: signalColor,

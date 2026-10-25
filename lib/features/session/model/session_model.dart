@@ -27,8 +27,7 @@ class SessionModel {
   final int? seatCols;
 
   bool get hasBaseline => baselineAt != null;
-  bool get hasSeatLayout =>
-      (seatRows ?? 0) > 0 && (seatCols ?? 0) > 0;
+  bool get hasSeatLayout => (seatRows ?? 0) > 0 && (seatCols ?? 0) > 0;
 
   /// True while the exam is running.
   bool get isActive => endTime == null;

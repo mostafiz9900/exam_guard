@@ -45,13 +45,21 @@ class DashboardModuleCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding: EdgeInsets.all(8.w),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
+                  // The dashboard caps its width but .w keeps scaling with
+                  // the screen, so on wide screens the icon must shrink.
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Container(
+                        padding: EdgeInsets.all(8.w),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon, color: color, size: 22.w),
+                      ),
                     ),
-                    child: Icon(icon, color: color, size: 22.w),
                   ),
                   SizedBox(width: 6.w),
                   Flexible(

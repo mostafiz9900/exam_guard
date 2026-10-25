@@ -31,6 +31,8 @@ bool sameFingerprint(ScannedDeviceModel a, ScannedDeviceModel b) {
   if (a.hasName || b.hasName) return false;
   if (a.manufacturer != b.manufacturer) return false;
   if (a.manufacturer == _genericManufacturer) return false;
+  // iOS hides everything that would tell these apart.
+  if (a.deviceType == ScannedDeviceModel.appleHiddenType) return false;
   if (a.deviceType != b.deviceType) return false;
   return _sameServiceSet(a.serviceUuids, b.serviceUuids);
 }

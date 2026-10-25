@@ -174,6 +174,9 @@ class WirelessScannerScreen extends HookConsumerWidget {
             onRetry: () => notifier.toggleScanning(true),
             onShowAll: () => filter.value = DeviceFilter.all,
             onDisableBoundary: () => notifier.toggleRoomBoundaryMode(false),
+            onOpenSettings: notifier.needsAppSettings
+                ? notifier.openAppSettings
+                : null,
           ),
         ),
       ];

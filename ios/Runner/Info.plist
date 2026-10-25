@@ -14,6 +14,8 @@
 	<string>ExamGuard requires Bluetooth access to scan for unauthorized wireless cheat devices in exam halls.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>ExamGuard uses the camera to photograph evidence when logging an exam violation.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ExamGuard links invigilator phones and sensor nodes in the same exam hall over the local Wi-Fi or hotspot.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ExamGuard requires Location access to discover nearby BLE devices.</string>
 	<key>CFBundleExecutable</key>

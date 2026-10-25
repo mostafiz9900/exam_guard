@@ -18,6 +18,7 @@ class ScannerEmptyState extends StatelessWidget {
     required this.onRetry,
     required this.onShowAll,
     required this.onDisableBoundary,
+    this.onOpenSettings,
   });
 
   final ScannerEmptyReason reason;
@@ -34,6 +35,10 @@ class ScannerEmptyState extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onShowAll;
   final VoidCallback onDisableBoundary;
+
+  /// Set when the error can only be fixed in the OS settings (permission
+  /// permanently denied); replaces "Try again" for [ScannerEmptyReason.error].
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -72,9 +77,11 @@ class ScannerEmptyState extends StatelessWidget {
         scheme.error,
         errorText ?? 'status_scan_failed'.tr(),
         null,
-        'scan_try_again'.tr(),
-        Icons.refresh_rounded,
-        onRetry,
+        onOpenSettings != null
+            ? 'scan_open_settings'.tr()
+            : 'scan_try_again'.tr(),
+        onOpenSettings != null ? Icons.settings_rounded : Icons.refresh_rounded,
+        onOpenSettings ?? onRetry,
       ),
       ScannerEmptyReason.waiting => (
         Icons.bluetooth_searching_rounded,

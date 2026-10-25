@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -10,6 +9,7 @@ import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/features/radar/model/proximity_meter.dart';
 import 'package:exam_guard/features/radar/model/radar_levels.dart';
 import 'package:exam_guard/features/radar/repository/radar_repository.dart';
+import 'package:exam_guard/features/scanner/model/distance_estimate.dart';
 import 'package:exam_guard/features/radar/view_model/finder_aliases.dart';
 import 'package:exam_guard/features/radar/view_model/rssi_trend_filter.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
@@ -123,27 +123,18 @@ class TrackingRadarState {
     );
   }
 
-  /// Typical RSSI of a phone-class transmitter at 1 m.
-  static const int defaultRssiAt1m = -59;
+  /// See [DistanceEstimate.defaultRssiAt1m].
+  static const int defaultRssiAt1m = DistanceEstimate.defaultRssiAt1m;
 
-  /// Expected RSSI at 1 m. The BLE TX Power Level is measured at 0 m, and
-  /// free-space loss over the first metre at 2.4 GHz is about 41 dB.
-  static int rssiAt1m(int? txPower) {
-    if (txPower == null || txPower < -30 || txPower > 20) {
-      return defaultRssiAt1m;
-    }
-    return txPower - 41;
-  }
+  /// See [DistanceEstimate.rssiAt1m].
+  static int rssiAt1m(int? txPower) => DistanceEstimate.rssiAt1m(txPower);
 
   /// Log-distance path loss estimate, in metres.
   static double calculateDistance(
     double rssi, {
     int rssiAt1m = defaultRssiAt1m,
-    double n = 2.5,
-  }) {
-    final ratio = (rssiAt1m - rssi) / (10 * n);
-    return math.pow(10, ratio).toDouble();
-  }
+    double n = DistanceEstimate.defaultPathLoss,
+  }) => DistanceEstimate.meters(rssi, rssiAt1m: rssiAt1m, n: n);
 
   /// RSSI distance is rough (±50 % or worse), so show one decimal at most.
   static String formatDistance(double? meters) {

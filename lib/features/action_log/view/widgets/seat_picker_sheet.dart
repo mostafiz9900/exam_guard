@@ -170,11 +170,16 @@ class _SeatPickerSheet extends StatelessWidget {
                 color: colors.onSecondaryContainer,
               ),
               SizedBox(width: 6.w),
-              Text(
-                'incident_seat_front'.tr(),
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: colors.onSecondaryContainer,
-                  fontWeight: FontWeight.bold,
+              // Small rooms make the banner narrower than the label.
+              Flexible(
+                child: Text(
+                  'incident_seat_front'.tr(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: colors.onSecondaryContainer,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],

@@ -35,6 +35,14 @@ void main() {
     }
   });
 
+  test('a wrong number is reported before a missing one', () {
+    final input = SeatLayoutInput.parse('40', '');
+    expect(input.errorKey, 'setup_seat_err_range');
+    expect((input.badRows, input.badCols), (true, false));
+    final both = SeatLayoutInput.parse('6', '');
+    expect((both.badRows, both.badCols), (false, true));
+  });
+
   test('only one of the two fields filled is rejected', () {
     expect(SeatLayoutInput.parse('6', '').errorKey, 'setup_seat_err_both');
     expect(SeatLayoutInput.parse('', '5').errorKey, 'setup_seat_err_both');

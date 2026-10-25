@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
@@ -255,7 +256,10 @@ class _AlertTile extends StatelessWidget {
                         'dash_alert_tile_detail'.tr(
                           args: {
                             'type': alert.deviceType,
-                            'rssi': '${alert.rssi}',
+                            'signal': signalSummaryText(
+                              alert.rssi,
+                              alert.transport,
+                            ),
                             'time': time,
                           },
                         ),

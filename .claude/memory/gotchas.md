@@ -125,3 +125,69 @@
 - **What Happens**: `bodySmall` (12.sp in AppTheme) rendered ~25 px at 800×360; extra `.sp` overrides doubled it again.
 - **How to Avoid**: For small captions on screens that must work in landscape, prefer M3 `label*` styles; never add `fontSize: x.sp` on top of a theme style. `.r` shrinks in landscape — radar widgets use `.rc` (radar_sizes.dart, floor 90 %).
 - **Discovered**: 2026-10-18
+
+#### core/permission — Android-only permissions are "permanently denied" on iOS
+- **What Happens**: iPhone always showed "Bluetooth/Location permission was permanently denied", no prompt.
+- **Why**: permission_handler maps `bluetoothScan`/`bluetoothConnect` to `UnknownPermissionStrategy` on iOS, which answers `permanentlyDenied`. Also: with SPM (no Podfile) permissions are enabled from Info.plist keys only when built from the project dir; builds from Xcode.app compile every permission out.
+- **How to Avoid**: Request `Permission.bluetooth` on iOS. Build with `fvm flutter run`; after Info.plist changes clear DerivedData.
+- **Discovered**: 2026-10-25
+
+#### go_router — refreshListenable on every session edit re-creates pushed pages
+- **What Happens**: After "Save record" the incident form re-opened empty instead of closing.
+- **Why**: `addLog` changed the session → router refresh → pushed page rebuilt, so the old screen's `popBack()` closed nothing.
+- **How to Avoid**: Router listens only to `(session != null, isActive)` — what `appRedirect` depends on.
+- **Discovered**: 2026-10-25
+
+#### UI — `.w` keeps scaling past the dashboard's 800 px max width
+- **What Happens**: Module cards overflowed on tablets / landscape (> 650 px, 3 columns).
+- **How to Avoid**: Wide grid uses rows sized by content (IntrinsicHeight); fixed-size children in width-capped layouts must be able to shrink (FittedBox/Flexible).
+- **Discovered**: 2026-10-25
+
+#### Tests — ScreenUtil scale and rootBundle futures leak between widget tests
+- **What Happens**: A tablet responsive test passed in the full file but failed alone (it reused a phone test's scale), hiding a real overflow. Later tests hung on translations cached in a finished test's zone.
+- **How to Avoid**: Run size-specific tests in isolation when checking layout; call `rootBundle.clear()` in `setUp`. Load real Roboto (see `loadFonts()` in responsive_test) — the default test font fakes overflows.
+- **Discovered**: 2026-10-25
+
+#### i18n — Missing keys render as the raw key on screen
+- **What Happens**: Radar showed "radar_band_range", "radar_status_live" etc. (12 keys never added to the JSON files).
+- **How to Avoid**: `test/core/localization/translation_keys_test.dart` fails on any literal `'key'.tr()` missing from en/bn/ar. Keys built at runtime (`'mag_level_$name'`) aren't covered — grep test output for "Localization key [...] not found".
+- **Discovered**: 2026-10-25
+
+#### UI — Show distance, not dBm, to invigilators
+- **How to Avoid**: Use `approxDistanceText` / `signalSummaryText` (features/scanner/view/distance_text.dart), backed by `DistanceEstimate` (shared with radar). Whole metres only; BLE only — Wi-Fi/classic keep dBm (different transmit power / no real level).
+- **Discovered**: 2026-10-25
+
+#### scanner — Most BLE devices advertise no name; Settings only lists paired / pairing-mode devices
+- **What Happens**: Users compare with the phone's Bluetooth settings and ask why most scanner entries are "Hidden BLE Device".
+- **How to Avoid**: Phones/AirPods/watches omit names for privacy. ScannerViewModel auto-identifies: every 4 s connects to the strongest nameless, connectable, non-Apple, non-phone device ≥ -80 dBm (once per id, max 40 per scan, never while the user is connected), reads GAP name 0x2A00, disconnects. OS-known names (`knownDeviceNames`: Android bonded + connected system devices) are applied on sighting.
+- **Discovered**: 2026-10-25
+
+#### iOS BLE — Apple devices arrive stripped; RSSI 127 means "unknown"
+- **What Happens** (on-device capture, iPhone, 2026-10-25): AirPods/iPhones/Macs arrive with NO name, NO manufacturer data, NO services (iOS hides Apple Continuity data from apps) — looked like "Hidden BLE Device". A device's first packet sometimes has `rssi=127` (iOS: unavailable), which seeded the smoother as "closest device".
+- **How to Avoid**: `BluetoothServiceImpl` drops packets with rssi ≥ 0 and sets `BleScanRecord.isPayloadHidden` on iOS for fully empty adverts → repository labels them `ScannedDeviceModel.appleHiddenType` (manufacturer Apple). Never group them (nothing distinguishes them); audio + smartphone filters include them. iOS can't tell AirPods from an iPhone, and can't see classic-only (connected) earbuds at all — Android is the stronger invigilation phone.
+- **Discovered**: 2026-10-25
+
+#### hall — Local link needs platform switches; host must stay in foreground on iOS
+- **What Happens**: dart:io sockets fail in release Android builds without `INTERNET`; `ws://` is refused unless cleartext is allowed; iOS asks for Local Network permission (needs `NSLocalNetworkUsageDescription`) and suspends the hub in background.
+- **How to Avoid**: Manifest has INTERNET + ACCESS_NETWORK_STATE + `usesCleartextTraffic`; Info.plist has the local-network text. `hallViewModelProvider` is NOT autoDispose (lives for the exam) — it leaves the hall itself when the session ends. The hub rewrites `from` on relayed messages (never trust the sender's claim). ESP32 nodes expect port 47800 at the hotspot gateway — don't change `HallRepository.defaultPort` without updating firmware.
+- **Discovered**: 2026-10-25
+
+#### firmware/esp32 — A header named config.h collides with the ESP32 toolchain
+- **What Happens**: `__has_include("config.h")` found another config.h on the Arduino-ESP32 include path; every setting was "not declared".
+- **How to Avoid**: Node settings live in `include/node_config.h` (git-ignored; template `node_config.example.h`). Nodes send raw clues (mfid/mfb/svc/SSID, no `type`) — the app classifies them in `HallProtocol.decodeSightings`, so firmware never needs category rules. Keep hello/sightings shapes in step with `hall_protocol.dart`.
+- **Discovered**: 2026-10-25
+
+#### firmware/esp32 — Setup portal must never open automatically on Wi-Fi failure
+- **What Happens**: Common WiFiManager examples fall back to a config AP when Wi-Fi fails; in an exam that opens a setup network exactly when the hotspot is off.
+- **How to Avoid**: Portal only on first start (no key / no Wi-Fi) or BOOT held 3 s; password (`SETUP_PASSWORD`), 5-min timeout, restart afterwards. Tampering shows up in the app as "Sensor node offline" (HallState.offlineNodes). Node alerts are raised by the HOST with `NodeAlertTracker` (phone scanner rules + rotation handling), not by the node.
+- **Discovered**: 2026-10-25
+
+#### Tests — InputDecorator keeps a cleared error Text in its crossfade stack
+- **What Happens**: After a field's error cleared, `find.text(error)` still found it (inside `_HelperError`'s FadeTransition), even after the fade.
+- **How to Avoid**: Assert `tester.state<FormFieldState<String>>(...).hasError`, not the text. Also: screens that show a summary of field errors must listen to the controllers (`useListenable`), or the summary goes stale while typing. Setup form rules live in `SessionFormValidator` (features/session/model).
+- **Discovered**: 2026-10-25
+
+#### UI tests — Shadows can't be judged from test screenshots
+- **What Happens**: BoxShadow / Material elevation render as hard grey/black bands in `toImage` captures of widget tests.
+- **How to Avoid**: For sheets/cards that must look clean everywhere, use a thin `outlineVariant` border instead of a shadow (setup screen does). The setup header art is `ExamHallBackdrop` (CustomPainter, no image asset); its radar sweep repeats via `useEffect` and stops with reduced motion.
+- **Discovered**: 2026-10-25

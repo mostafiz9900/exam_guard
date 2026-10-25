@@ -16,6 +16,7 @@ class BleScanRecord {
     required this.serviceUuids,
     required this.manufacturerData,
     required this.timestamp,
+    this.isPayloadHidden = false,
   });
 
   /// Normalized (trimmed, upper-case) remote id / MAC address.
@@ -29,6 +30,10 @@ class BleScanRecord {
   final List<String> serviceUuids;
   final Map<int, List<int>> manufacturerData;
   final DateTime timestamp;
+
+  /// The OS delivered this advertisement with all its content removed. iOS
+  /// does this for Apple's own devices (iPhone, AirPods, Watch, Mac).
+  final bool isPayloadHidden;
 }
 
 /// A BLE scan could not start or stopped with an error. [message] is
@@ -94,6 +99,11 @@ abstract interface class IBluetoothService {
   Future<BleConnectionInfo> connect(String deviceId);
 
   Future<void> disconnect(String deviceId);
+
+  /// Names the OS already knows, by device id: devices paired with this
+  /// phone (Android) and devices connected to it (both platforms). Nameless
+  /// advertisements from these devices can be shown under that name.
+  Future<Map<String, String>> knownDeviceNames();
 
   Future<void> dispose();
 }

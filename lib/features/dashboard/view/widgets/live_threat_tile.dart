@@ -1,3 +1,4 @@
+import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -43,12 +44,17 @@ class LiveThreatTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          '${device.rssi} dBm • ${device.manufacturer} • ${device.id}',
-          style: TextStyle(
-            fontSize: 10.sp,
-            color: colors.onSurfaceVariant,
-            fontFamily: 'monospace',
+          'dash_feed_detail'.tr(
+            args: {
+              'signal': signalSummaryText(
+                device.rssi,
+                device.transport,
+                txPower: device.txPower,
+              ),
+              'manufacturer': device.manufacturer,
+            },
           ),
+          style: TextStyle(fontSize: 10.sp, color: colors.onSurfaceVariant),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

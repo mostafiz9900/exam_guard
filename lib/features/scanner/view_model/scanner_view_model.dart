@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
@@ -407,6 +409,17 @@ class ScannerViewModel extends Notifier<ScannerState> {
   /// raises an alert (one stray packet is not enough).
   static const Duration _bleConfirmSpan = Duration(seconds: 3);
 
+  /// Nameless nearby devices are briefly connected to, one at a time, to
+  /// read the name stored inside them. A new candidate at most this often.
+  static const Duration _nameLookupEvery = Duration(seconds: 4);
+  static const Duration _nameLookupTimeout = Duration(seconds: 10);
+
+  /// Only devices about inside the room are worth a connection.
+  static const int _nameLookupMinRssi = -80;
+
+  /// Lookups per scan, so rotating addresses can't keep the radio busy.
+  static const int _maxNameLookups = 40;
+
   /// Minimum signal for an alert: about inside the room.
   static const int _alertRssi = -75;
   static const int _hotspotAlertRssi = -80;
@@ -422,6 +435,13 @@ class ScannerViewModel extends Notifier<ScannerState> {
   StreamSubscription<BleScanError?>? _problemSub;
   StreamSubscription<WifiScanProblem?>? _wifiProblemSub;
   Timer? _evictTimer;
+  Timer? _nameLookupTimer;
+  final Set<String> _nameLookupTried = {};
+  String? _nameLookupId;
+  int _nameLookupsLeft = _maxNameLookups;
+
+  /// Names the OS knows (paired / connected devices), by id.
+  Map<String, String> _knownNames = const {};
   Timer? _publishTimer;
   Future<void>? _starting;
 
@@ -893,6 +913,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
   }
 
   void _forgetAll() {
+    _nameLookupTried.clear();
     _live.clear();
     _appearance.clear();
     _smoother.clear();
@@ -943,6 +964,18 @@ class ScannerViewModel extends Notifier<ScannerState> {
     } catch (e, st) {
       _logger.warning('Opening Location settings failed', e, st);
       if (ref.mounted) _notify('scan_notice_location_settings');
+    }
+  }
+
+  /// The permission was permanently denied: only the OS settings can fix it.
+  bool get needsAppSettings =>
+      state.errorMessage == 'scan_err_permission_permanent';
+
+  Future<void> openAppSettings() async {
+    try {
+      await _repository.openAppSettings();
+    } catch (e, st) {
+      _logger.warning('Opening app settings failed', e, st);
     }
   }
 
@@ -1010,6 +1043,13 @@ class ScannerViewModel extends Notifier<ScannerState> {
     _evictTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _evictStaleDevices();
     });
+    unawaited(_loadKnownNames());
+    _nameLookupsLeft = _maxNameLookups;
+    _nameLookupTimer?.cancel();
+    _nameLookupTimer = Timer.periodic(
+      _nameLookupEvery,
+      (_) => unawaited(_lookUpNextName()),
+    );
 
     // Classic and Wi-Fi are extras: if they fail, BLE still runs.
     await _startSlowScans();
@@ -1212,16 +1252,18 @@ class ScannerViewModel extends Notifier<ScannerState> {
     final rotatedFrom = existing == null ? _rotatedFrom(seen) : null;
     final previous = existing ?? rotatedFrom;
 
-    final device = previous == null
-        ? seen
-        : seen.copyWith(
-            isConnectable: seen.isConnectable || previous.isConnectable,
-            firstSeen: previous.firstSeen,
-            isConnected: existing?.isConnected,
-            isConnecting: existing?.isConnecting,
-            batteryLevel: existing?.batteryLevel,
-            fullGattName: existing?.fullGattName,
-          );
+    final device = _withKnownName(
+      previous == null
+          ? seen
+          : seen.copyWith(
+              isConnectable: seen.isConnectable || previous.isConnectable,
+              firstSeen: previous.firstSeen,
+              isConnected: existing?.isConnected,
+              isConnecting: existing?.isConnecting,
+              batteryLevel: existing?.batteryLevel,
+              fullGattName: existing?.fullGattName,
+            ),
+    );
 
     if (rotatedFrom != null) {
       _recordRotation(rotatedFrom.id, seen.id);
@@ -1282,9 +1324,10 @@ class ScannerViewModel extends Notifier<ScannerState> {
             isHighSuspicion: seen.isHighSuspicion || existing.isHighSuspicion,
             firstSeen: existing.firstSeen,
           );
-    existing == null ? _addNew(device) : _live[device.id] = device;
+    final named = _withKnownName(device);
+    existing == null ? _addNew(named) : _live[named.id] = named;
     _publish();
-    _maybeAlert(device);
+    _maybeAlert(named);
   }
 
   void _onWifiScan(List<ScannedDeviceModel> scan) {
@@ -1334,6 +1377,91 @@ class ScannerViewModel extends Notifier<ScannerState> {
   static bool _sameServices(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
+  /// [d] under the name the OS knows for it, when it advertises none.
+  ScannedDeviceModel _withKnownName(ScannedDeviceModel d) {
+    if (d.hasName) return d;
+    final known = _knownNames[d.id];
+    return known == null ? d : d.copyWith(fullGattName: known);
+  }
+
+  Future<void> _loadKnownNames() async {
+    try {
+      final names = await _repository.knownDeviceNames();
+      if (!ref.mounted || names.isEmpty) return;
+      _knownNames = names;
+      var changed = false;
+      for (final d in _live.values.toList()) {
+        final named = _withKnownName(d);
+        if (!identical(named, d)) {
+          _live[d.id] = named;
+          changed = true;
+        }
+      }
+      if (changed) _publish();
+    } catch (e, st) {
+      _logger.warning('Reading known device names failed', e, st);
+    }
+  }
+
+  /// Phones and Apple devices don't reveal a name over a plain connection,
+  /// so they aren't worth one.
+  static bool _worthNameLookup(ScannedDeviceModel d) =>
+      d.isBle &&
+      !d.hasName &&
+      d.isConnectable &&
+      !d.isConnected &&
+      !d.isConnecting &&
+      d.rssi >= _nameLookupMinRssi &&
+      !d.manufacturer.contains('Apple') &&
+      !d.deviceType.contains('Smartphone');
+
+  /// Runs one name-lookup step now instead of waiting for the timer.
+  @visibleForTesting
+  Future<void> lookUpNextNameNow() => _lookUpNextName();
+
+  /// Connects to the strongest nameless nearby device not tried yet, reads
+  /// its name and disconnects. One at a time, and never while the user is
+  /// connected to something.
+  Future<void> _lookUpNextName() async {
+    if (_nameLookupId != null || _nameLookupsLeft <= 0) return;
+    if (!state.isScanning || state.isLocationOff) return;
+    if (_live.values.any((d) => d.isConnected || d.isConnecting)) return;
+    ScannedDeviceModel? target;
+    for (final d in _live.values) {
+      if (_nameLookupTried.contains(d.id) || !_worthNameLookup(d)) continue;
+      if (target == null || d.rssi > target.rssi) target = d;
+    }
+    if (target == null) return;
+
+    final id = target.id;
+    _nameLookupTried.add(id);
+    _nameLookupsLeft--;
+    _nameLookupId = id;
+    BleConnectionInfo? info;
+    try {
+      info = await _repository.connect(id).timeout(_nameLookupTimeout);
+    } catch (e) {
+      _logger.debug('Name lookup failed for $id: $e');
+    } finally {
+      // Keep a connection the user made meanwhile.
+      if (_live[id]?.isConnected != true) {
+        try {
+          await _repository.disconnect(id);
+        } catch (_) {}
+      }
+      _nameLookupId = null;
+    }
+    final name = info?.gattName?.trim() ?? '';
+    if (!ref.mounted || name.isEmpty) return;
+    _replace(
+      id,
+      (d) => d.copyWith(
+        fullGattName: name,
+        batteryLevel: info?.batteryLevel ?? d.batteryLevel,
+      ),
+    );
+  }
+
   void _replace(
     String id,
     ScannedDeviceModel Function(ScannedDeviceModel) update,
@@ -1353,6 +1481,8 @@ class ScannerViewModel extends Notifier<ScannerState> {
   void _stop({bool keepAdapterListener = false}) {
     _evictTimer?.cancel();
     _evictTimer = null;
+    _nameLookupTimer?.cancel();
+    _nameLookupTimer = null;
     _sightingsSub?.cancel();
     _sightingsSub = null;
     _classicSub?.cancel();

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -116,6 +117,11 @@ class _DeviceDetailsSheet extends StatelessWidget {
               value: device.address,
               monospace: true,
             ),
+            if (device.isBle)
+              DetailRow(
+                label: 'scan_detail_distance'.tr(),
+                value: approxDistanceText(device.rssi, txPower: device.txPower),
+              ),
             DetailRow(
               label: 'scan_detail_rssi'.tr(),
               value: '${device.rssi} dBm',

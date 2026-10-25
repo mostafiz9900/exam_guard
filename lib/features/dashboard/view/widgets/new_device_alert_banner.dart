@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
@@ -95,7 +96,10 @@ class NewDeviceAlertBanner extends ConsumerWidget {
                         'dash_alert_detail'.tr(
                           args: {
                             'type': latest.deviceType,
-                            'rssi': '${latest.rssi}',
+                            'signal': signalSummaryText(
+                              latest.rssi,
+                              latest.transport,
+                            ),
                           },
                         ),
                         maxLines: 2,

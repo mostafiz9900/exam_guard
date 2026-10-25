@@ -15,6 +15,9 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'radar/finder_fakes.dart' show FakeHaptics, FakeScanner, FakeWakelock;
 
 class FakeBluetoothService implements IBluetoothService {
+
+  @override
+  Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();
   final owners = <String>{};
   BleScanException? startError;

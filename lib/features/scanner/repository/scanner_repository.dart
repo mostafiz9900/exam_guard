@@ -17,7 +17,11 @@ class _AdvertisedProfile {
   final Map<int, List<int>> manufacturerData = {};
   final Set<String> serviceUuids = {};
 
+  /// Every packet so far had its content hidden by iOS.
+  bool? payloadHidden;
+
   void merge(BleScanRecord r) {
+    payloadHidden = (payloadHidden ?? true) && r.isPayloadHidden;
     if (r.name.isNotEmpty) name = r.name;
     txPower = r.txPower ?? txPower;
     manufacturerData.addAll(r.manufacturerData);
@@ -65,6 +69,10 @@ class ScannerRepository {
   /// Opens the system Location settings. False where that isn't possible.
   Future<bool> openLocationSettings() => _permissions.openLocationSettings();
 
+  /// Opens this app's page in the OS settings, where a permanently denied
+  /// permission can be granted again.
+  Future<bool> openAppSettings() => _permissions.openSettings();
+
   /// Throws [BleScanException] when scanning cannot start.
   Future<void> startScan() => _bluetooth.startScan(_scanOwner);
 
@@ -109,6 +117,11 @@ class ScannerRepository {
       _bluetooth.connect(deviceId);
 
   Future<void> disconnect(String deviceId) => _bluetooth.disconnect(deviceId);
+
+  /// Paired / connected devices' names by id (see
+  /// [IBluetoothService.knownDeviceNames]).
+  Future<Map<String, String>> knownDeviceNames() =>
+      _bluetooth.knownDeviceNames();
 
   /// Maps one classic Bluetooth inquiry result.
   static ScannedDeviceModel classicToDevice(ClassicBtRecord r) {
@@ -171,20 +184,25 @@ class ScannerRepository {
       ..merge(record);
     final serviceUuids = profile.serviceUuids.toList();
 
-    final manufacturer = BluetoothDeviceInspector.resolveManufacturer(
-      record.id,
-      profile.manufacturerData,
-    );
+    final hidden = profile.payloadHidden ?? false;
+    final manufacturer = hidden
+        ? 'Apple Inc.'
+        : BluetoothDeviceInspector.resolveManufacturer(
+            record.id,
+            profile.manufacturerData,
+          );
     return ScannedDeviceModel(
       id: record.id,
       name: profile.name,
       manufacturer: manufacturer,
-      deviceType: BluetoothDeviceInspector.resolveDeviceType(
-        profile.name,
-        manufacturer,
-        serviceUuids,
-        profile.manufacturerData,
-      ),
+      deviceType: hidden
+          ? ScannedDeviceModel.appleHiddenType
+          : BluetoothDeviceInspector.resolveDeviceType(
+              profile.name,
+              manufacturer,
+              serviceUuids,
+              profile.manufacturerData,
+            ),
       rssi: record.rssi,
       txPower: profile.txPower,
       isConnectable: record.isConnectable,

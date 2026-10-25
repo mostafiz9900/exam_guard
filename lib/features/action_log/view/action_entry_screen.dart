@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/widgets/app_text_context_menu.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
@@ -337,6 +338,7 @@ class ActionEntryScreen extends HookConsumerWidget {
 
                     // Multi-line notes (CustomTextField is single-line).
                     TextField(
+                      contextMenuBuilder: appTextContextMenu,
                       controller: notes,
                       minLines: 3,
                       maxLines: 4,

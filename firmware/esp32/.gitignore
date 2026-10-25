@@ -1,0 +1,3 @@
+.pio/
+# Holds the hotspot password and node key — never commit it.
+include/node_config.h

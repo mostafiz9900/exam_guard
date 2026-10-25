@@ -7,6 +7,9 @@ import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 
 class FakeFinderBluetooth implements IBluetoothService {
+
+  @override
+  Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();
   final problems = StreamController<BleScanError?>.broadcast();
   final adapter = StreamController<BleAdapterStatus>.broadcast();

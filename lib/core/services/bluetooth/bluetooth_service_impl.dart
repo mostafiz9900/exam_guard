@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -113,6 +114,9 @@ class BluetoothServiceImpl implements IBluetoothService {
     _resultsSub ??= FlutterBluePlus.onScanResults.listen(
       (results) {
         for (final r in results) {
+          // iOS reports 127 when the level is unavailable; a real BLE RSSI
+          // is always negative. Such a packet would read as "closest".
+          if (r.rssi >= 0) continue;
           _records.add(_mapResult(r));
         }
       },
@@ -208,14 +212,24 @@ class BluetoothServiceImpl implements IBluetoothService {
     );
 
     int? battery;
+    var gapName = '';
     try {
       final services = await device.discoverServices();
       for (final s in services) {
-        if (s.uuid.str.toUpperCase() != '180F') continue;
+        final service = s.uuid.str.toUpperCase();
         for (final c in s.characteristics) {
-          if (c.uuid.str.toUpperCase() == '2A19' && c.properties.read) {
+          if (!c.properties.read) continue;
+          final char = c.uuid.str.toUpperCase();
+          if (service == '180F' && char == '2A19') {
             final value = await c.read();
             if (value.isNotEmpty) battery = value.first;
+          } else if (service == '1800' && char == '2A00') {
+            // GAP Device Name. iOS hides this service, but updates
+            // platformName from it instead.
+            gapName = utf8
+                .decode(await c.read(), allowMalformed: true)
+                .replaceAll('\u0000', '')
+                .trim();
           }
         }
       }
@@ -223,7 +237,7 @@ class BluetoothServiceImpl implements IBluetoothService {
       _logger.warning('GATT discovery failed for $deviceId', e, st);
     }
 
-    final name = device.platformName.trim();
+    final name = gapName.isNotEmpty ? gapName : device.platformName.trim();
     return BleConnectionInfo(
       batteryLevel: battery,
       gattName: name.isEmpty ? null : name,
@@ -233,6 +247,31 @@ class BluetoothServiceImpl implements IBluetoothService {
   @override
   Future<void> disconnect(String deviceId) =>
       BluetoothDevice.fromId(deviceId).disconnect();
+
+  @override
+  Future<Map<String, String>> knownDeviceNames() async {
+    final names = <String, String>{};
+    void add(List<BluetoothDevice> devices) {
+      for (final d in devices) {
+        final name = d.platformName.trim();
+        if (name.isNotEmpty) names[d.remoteId.str.trim().toUpperCase()] = name;
+      }
+    }
+
+    try {
+      add(await FlutterBluePlus.systemDevices([Guid('1800')]));
+    } catch (e, st) {
+      _logger.warning('Reading connected system devices failed', e, st);
+    }
+    if (Platform.isAndroid) {
+      try {
+        add(await FlutterBluePlus.bondedDevices);
+      } catch (e, st) {
+        _logger.warning('Reading paired devices failed', e, st);
+      }
+    }
+    return names;
+  }
 
   @override
   Future<void> dispose() async {
@@ -265,6 +304,14 @@ class BluetoothServiceImpl implements IBluetoothService {
       serviceUuids: adv.serviceUuids.map((u) => u.str.toUpperCase()).toList(),
       manufacturerData: adv.manufacturerData,
       timestamp: r.timeStamp,
+      // iOS removes the whole advertisement of Apple's own devices.
+      isPayloadHidden:
+          Platform.isIOS &&
+          adv.advName.trim().isEmpty &&
+          adv.manufacturerData.isEmpty &&
+          adv.serviceUuids.isEmpty &&
+          adv.serviceData.isEmpty &&
+          adv.txPowerLevel == null,
     );
   }
 

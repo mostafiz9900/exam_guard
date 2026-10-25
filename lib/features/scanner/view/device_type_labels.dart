@@ -9,6 +9,9 @@ import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 
 /// Full category name, e.g. "Smart Earpiece / Audio".
 String deviceTypeLabel(String type) {
+  if (type == ScannedDeviceModel.appleHiddenType) {
+    return 'scan_type_apple_hidden'.tr();
+  }
   if (type == 'Wi-Fi Access Point') return 'scan_type_wifi_ap'.tr();
   if (type == 'Computer / Laptop') return 'scan_type_computer'.tr();
   if (type == 'Bluetooth Device') return 'scan_type_classic_other'.tr();
@@ -26,6 +29,9 @@ String deviceTypeLabel(String type) {
 
 /// Short category name for small badges, e.g. "Smart Earpiece".
 String deviceTypeShortLabel(String type) {
+  if (type == ScannedDeviceModel.appleHiddenType) {
+    return 'scan_short_apple'.tr();
+  }
   if (type == 'Wi-Fi Access Point') return 'scan_short_wifi_ap'.tr();
   if (type == 'Computer / Laptop') return 'scan_short_computer'.tr();
   if (type == 'Bluetooth Device') return 'scan_short_classic_other'.tr();

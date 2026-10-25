@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:exam_guard/core/widgets/app_text_context_menu.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 
@@ -20,6 +22,15 @@ class CustomTextField extends StatelessWidget {
     this.onSubmitted,
     this.textInputAction,
     this.readOnly = false,
+    this.labelText,
+    this.isRequired = false,
+    this.helperText,
+    this.maxLength,
+    this.inputFormatters,
+    this.validator,
+    this.autovalidateMode,
+    this.textCapitalization = TextCapitalization.none,
+    this.focusNode,
   });
 
   final String hintText;
@@ -35,6 +46,23 @@ class CustomTextField extends StatelessWidget {
   final TextInputAction? textInputAction;
   final bool readOnly;
 
+  /// Floating label above the field; [isRequired] adds a " *".
+  final String? labelText;
+  final bool isRequired;
+
+  /// Grey hint under the field while there is no error.
+  final String? helperText;
+
+  /// Hard limit with a "12/20" counter.
+  final int? maxLength;
+  final List<TextInputFormatter>? inputFormatters;
+
+  /// Form validation (inside a [Form]); returns the message or null.
+  final FormFieldValidator<String>? validator;
+  final AutovalidateMode? autovalidateMode;
+  final TextCapitalization textCapitalization;
+  final FocusNode? focusNode;
+
   @override
   Widget build(BuildContext context) {
     final border = OutlineInputBorder(
@@ -47,6 +75,7 @@ class CustomTextField extends StatelessWidget {
 
     return TextFormField(
       controller: controller,
+      contextMenuBuilder: appTextContextMenu,
       keyboardType: keyboardType,
       obscureText: obscureText,
       readOnly: readOnly,
@@ -54,6 +83,13 @@ class CustomTextField extends StatelessWidget {
       onTap: onTap,
       onFieldSubmitted: onSubmitted,
       textInputAction: textInputAction,
+      maxLength: maxLength,
+      maxLengthEnforcement: MaxLengthEnforcement.enforced,
+      inputFormatters: inputFormatters,
+      validator: validator,
+      autovalidateMode: autovalidateMode,
+      textCapitalization: textCapitalization,
+      focusNode: focusNode,
       style: TextStyle(
         color: Theme.of(context).colorScheme.onSurface,
         fontSize: AppDimens.bodyLarge,
@@ -61,6 +97,16 @@ class CustomTextField extends StatelessWidget {
       decoration: InputDecoration(
         isDense: true,
         hintText: hintText,
+        labelText: labelText == null
+            ? null
+            : isRequired
+            ? '$labelText *'
+            : labelText,
+        helperText: helperText,
+        helperMaxLines: 2,
+        floatingLabelBehavior: labelText == null
+            ? null
+            : FloatingLabelBehavior.always,
         hintStyle: TextStyle(
           color: Theme.of(context).colorScheme.onSurfaceVariant,
           fontSize: AppDimens.bodyMedium,

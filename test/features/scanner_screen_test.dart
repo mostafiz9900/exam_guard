@@ -26,6 +26,9 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeBluetooth implements IBluetoothService {
+
+  @override
+  Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();
   final problems = StreamController<BleScanError?>.broadcast();
 
@@ -63,13 +66,17 @@ class _FakeBluetooth implements IBluetoothService {
 
 class _Permissions implements IPermissionService {
   int locationSettingsOpened = 0;
+  int appSettingsOpened = 0;
+  AppPermissionStatus status = AppPermissionStatus.granted;
 
   @override
-  Future<AppPermissionStatus> requestBluetoothScan() async =>
-      AppPermissionStatus.granted;
+  Future<AppPermissionStatus> requestBluetoothScan() async => status;
 
   @override
-  Future<bool> openSettings() async => true;
+  Future<bool> openSettings() async {
+    appSettingsOpened++;
+    return true;
+  }
 
   @override
   Future<bool> openLocationSettings() async {
@@ -161,6 +168,7 @@ Future<void> _pumpScreen(
   _Permissions permissions, {
   ThemeMode themeMode = ThemeMode.light,
   IClassicBluetoothService? classic,
+  bool expectScanning = true,
 }) async {
   _boundary = GlobalKey();
   // Cached asset futures belong to the previous test's zone and never
@@ -219,12 +227,13 @@ Future<void> _pumpScreen(
   );
   for (
     var i = 0;
-    i < 20 && !container.read(scannerViewModelProvider).isScanning;
+    i < 20 &&
+        container.read(scannerViewModelProvider).isScanning != expectScanning;
     i++
   ) {
     await _settle(tester);
   }
-  expect(container.read(scannerViewModelProvider).isScanning, isTrue);
+  expect(container.read(scannerViewModelProvider).isScanning, expectScanning);
 }
 
 Future<void> _unmount(WidgetTester tester) async {
@@ -275,6 +284,28 @@ void main() {
     bluetooth.problems.add(null);
     await _settle(tester);
     expect(find.byType(LocationOffBanner), findsNothing);
+
+    await _unmount(tester);
+  });
+
+  testWidgets('permanently denied permission offers Open Settings', (
+    tester,
+  ) async {
+    final bluetooth = _FakeBluetooth();
+    final permissions = _Permissions()
+      ..status = AppPermissionStatus.permanentlyDenied;
+    await _pumpScreen(tester, bluetooth, permissions, expectScanning: false);
+    await _settle(tester);
+
+    final empty = tester.widget<ScannerEmptyState>(
+      find.byType(ScannerEmptyState),
+    );
+    expect(empty.reason, ScannerEmptyReason.error);
+    expect(find.text('Try again'), findsNothing);
+
+    await tester.tap(find.text('Open Settings'));
+    await _settle(tester);
+    expect(permissions.appSettingsOpened, 1);
 
     await _unmount(tester);
   });

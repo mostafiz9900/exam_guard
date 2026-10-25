@@ -42,6 +42,7 @@ enum DeviceFilter {
       DeviceFilter.strongSignal => device.rssi > -65,
       DeviceFilter.audioDevices =>
         device.deviceType.contains('Audio') ||
+            device.deviceType == ScannedDeviceModel.appleHiddenType ||
             nameHas(const ['headset', 'airpod', 'buds', 'tws']),
       DeviceFilter.wifiHotspots =>
         device.deviceType.contains('Hotspot') ||
@@ -55,6 +56,7 @@ enum DeviceFilter {
             name.contains('esp32'),
       DeviceFilter.smartphones =>
         device.deviceType.contains('Smartphone') ||
+            device.deviceType == ScannedDeviceModel.appleHiddenType ||
             nameHas(const ['iphone', 'galaxy', 'pixel', 'phone']),
     };
   }

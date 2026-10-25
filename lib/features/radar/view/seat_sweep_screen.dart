@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/widgets/app_text_context_menu.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
@@ -680,6 +681,7 @@ class _SeatLayoutForm extends HookWidget {
     Widget field(TextEditingController c, String label, String hint, Key key) =>
         Expanded(
           child: TextField(
+            contextMenuBuilder: appTextContextMenu,
             key: key,
             controller: c,
             enabled: !isSaving,

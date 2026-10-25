@@ -43,6 +43,12 @@ class ScannedDeviceModel {
   /// Manufacturer value of every Wi-Fi access point.
   static const String wifiManufacturer = 'Wi-Fi';
 
+  /// Category of a device whose advertisement iOS hid completely, which it
+  /// does only for Apple devices. Which one (iPhone, AirPods, Watch) can't
+  /// be told.
+  static const String appleHiddenType =
+      'Apple Device (iPhone / AirPods / Watch)';
+
   const ScannedDeviceModel({
     required this.id,
     required this.name,

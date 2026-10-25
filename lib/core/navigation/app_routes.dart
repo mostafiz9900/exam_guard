@@ -23,6 +23,12 @@ class AppRoute {
   /// report would otherwise replace the running exam in memory).
   static const String history = '/history';
 
+  /// Shared hall: several invigilator phones and ESP32 sensor nodes.
+  static const String hall = '/hall';
+
+  /// Scans a hall QR code; pops with its text.
+  static const String hallScan = '/hall/scan';
+
   /// Routes that only make sense while an exam is running.
   static const Set<String> requireActiveSession = {
     dashboard,
@@ -33,5 +39,7 @@ class AppRoute {
     actionNew,
     walkFinder,
     seatSweep,
+    hall,
+    hallScan,
   };
 }

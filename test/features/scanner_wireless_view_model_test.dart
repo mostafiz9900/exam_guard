@@ -8,12 +8,24 @@ import 'package:exam_guard/core/services/classic_bluetooth/i_classic_bluetooth_s
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 import 'package:exam_guard/core/services/storage/i_local_storage.dart';
 import 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart';
+import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class _Bluetooth implements IBluetoothService {
+
+  /// Names the OS knows (paired / connected), by id.
+  Map<String, String> known = const {};
+
+  /// Name each device reveals when connected to.
+  final gattNames = <String, String>{};
+  final connects = <String>[];
+  final disconnects = <String>[];
+
+  @override
+  Future<Map<String, String>> knownDeviceNames() async => known;
   final records = StreamController<BleScanRecord>.broadcast();
   final owners = <String>{};
 
@@ -39,11 +51,13 @@ class _Bluetooth implements IBluetoothService {
   Future<void> stopScan(String owner) async => owners.remove(owner);
 
   @override
-  Future<BleConnectionInfo> connect(String deviceId) async =>
-      const BleConnectionInfo();
+  Future<BleConnectionInfo> connect(String deviceId) async {
+    connects.add(deviceId);
+    return BleConnectionInfo(gattName: gattNames[deviceId]);
+  }
 
   @override
-  Future<void> disconnect(String deviceId) async {}
+  Future<void> disconnect(String deviceId) async => disconnects.add(deviceId);
 
   @override
   Future<void> dispose() async {}
@@ -343,6 +357,108 @@ void main() {
       wifiScan.problems.add(null);
       await pumpEventQueue();
       expect(read().wifiProblem, isNull);
+    });
+  });
+
+  group('device names', () {
+    setUp(setUpContainer);
+
+    ScannedDeviceModel device(String id) =>
+        read().devices.firstWhere((d) => d.id == id);
+
+    test('a nameless nearby device gets the name stored inside it', () async {
+      bluetooth.gattNames['AA:00:00:00:00:01'] = 'Exam Pod';
+      bluetooth.records.add(ble('AA:00:00:00:00:01', -60, at: DateTime.now()));
+      await pumpEventQueue();
+      expect(device('AA:00:00:00:00:01').hasName, isFalse);
+
+      await vm().lookUpNextNameNow();
+      expect(bluetooth.connects, ['AA:00:00:00:00:01']);
+      expect(bluetooth.disconnects, ['AA:00:00:00:00:01']);
+      expect(device('AA:00:00:00:00:01').displayName, 'Exam Pod');
+    });
+
+    test('tries each device once, closest first; skips named, far and '
+        'Apple devices', () async {
+      final now = DateTime.now();
+      bluetooth.records
+        ..add(ble('AA:00:00:00:00:01', -75, at: now))
+        ..add(ble('AA:00:00:00:00:02', -55, at: now))
+        ..add(ble('AA:00:00:00:00:03', -50, name: 'Band', at: now))
+        ..add(ble('AA:00:00:00:00:04', -95, at: now))
+        ..add(
+          ble(
+            'AA:00:00:00:00:05',
+            -50,
+            at: now,
+            manufacturerData: const {
+              0x004C: [0x10, 0x05, 0x01],
+            },
+          ),
+        );
+      await pumpEventQueue();
+
+      for (var i = 0; i < 4; i++) {
+        await vm().lookUpNextNameNow();
+      }
+      expect(bluetooth.connects, ['AA:00:00:00:00:02', 'AA:00:00:00:00:01']);
+      // Nothing revealed a name: labels stay as they were.
+      expect(device('AA:00:00:00:00:02').hasName, isFalse);
+    });
+
+    test('no lookup while the user is connected to a device', () async {
+      final now = DateTime.now();
+      bluetooth.records
+        ..add(ble('AA:00:00:00:00:01', -60, at: now))
+        ..add(ble('AA:00:00:00:00:02', -60, at: now));
+      await pumpEventQueue();
+      await vm().probeDeviceConnection('AA:00:00:00:00:01');
+      bluetooth.connects.clear();
+
+      await vm().lookUpNextNameNow();
+      expect(bluetooth.connects, isEmpty);
+    });
+
+    test('packets iOS stripped make an Apple device; any content clears it',
+        () async {
+      final now = DateTime.now();
+      BleScanRecord hidden(String id) => BleScanRecord(
+        id: id,
+        name: '',
+        rssi: -45,
+        txPower: null,
+        isConnectable: false,
+        serviceUuids: const [],
+        manufacturerData: const {},
+        timestamp: now,
+        isPayloadHidden: true,
+      );
+      bluetooth.records
+        ..add(hidden('AA:00:00:00:00:21'))
+        ..add(hidden('AA:00:00:00:00:22'))
+        ..add(ble('AA:00:00:00:00:22', -45, name: 'Buds', at: now));
+      await pumpEventQueue();
+      // Updates to a listed device are published at most every 250 ms.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      final apple = device('AA:00:00:00:00:21');
+      expect(apple.deviceType, ScannedDeviceModel.appleHiddenType);
+      expect(apple.manufacturer, 'Apple Inc.');
+      expect(
+        device('AA:00:00:00:00:22').deviceType,
+        isNot(ScannedDeviceModel.appleHiddenType),
+      );
+    });
+
+    test('paired / connected devices show their saved name', () async {
+      bluetooth.known = {'AA:00:00:00:00:09': 'Invigilator Buds'};
+      await vm().toggleScanning(false);
+      await vm().toggleScanning(true);
+      bluetooth.records.add(ble('AA:00:00:00:00:09', -70, at: DateTime.now()));
+      await pumpEventQueue();
+
+      expect(device('AA:00:00:00:00:09').displayName, 'Invigilator Buds');
+      expect(device('AA:00:00:00:00:09').hasName, isTrue);
     });
   });
 

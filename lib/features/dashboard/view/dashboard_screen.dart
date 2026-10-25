@@ -18,6 +18,7 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/utils/app_date_format.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/hall_link_tile.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/live_stat_badge.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/dashboard_module_card.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/dashboard_scan_status.dart';
@@ -478,6 +479,8 @@ class DashboardScreen extends HookConsumerWidget {
                           SizedBox(height: AppDimens.spacingSmall),
                           const RoomBaselineCard(),
                         ],
+                        SizedBox(height: AppDimens.spacingSmall),
+                        const HallLinkTile(),
                         SizedBox(height: AppDimens.spacingLarge),
 
                         Text(
@@ -491,13 +494,8 @@ class DashboardScreen extends HookConsumerWidget {
                         SizedBox(height: AppDimens.spacingSmall),
 
                         // Responsive Grid Navigation Deck
-                        GridView.count(
-                          crossAxisCount: isWideScreen ? 3 : 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          crossAxisSpacing: AppDimens.spacingMedium,
-                          mainAxisSpacing: AppDimens.spacingMedium,
-                          childAspectRatio: 1.15,
+                        _ModuleGrid(
+                          columns: isWideScreen ? 3 : 2,
                           children: [
                             Consumer(
                               builder: (context, ref, _) {
@@ -628,6 +626,54 @@ class DashboardScreen extends HookConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Module cards in a grid. Phones keep a fixed card shape; wider screens
+/// scale card content past what a fixed aspect ratio can hold, so there
+/// each row takes its tallest card's height instead.
+class _ModuleGrid extends StatelessWidget {
+  const _ModuleGrid({required this.columns, required this.children});
+
+  final int columns;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final gap = AppDimens.spacingMedium;
+    if (columns == 2) {
+      return GridView.count(
+        crossAxisCount: columns,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisSpacing: gap,
+        mainAxisSpacing: gap,
+        childAspectRatio: 1.15,
+        children: children,
+      );
+    }
+    return Column(
+      children: [
+        for (var i = 0; i < children.length; i += columns) ...[
+          if (i > 0) SizedBox(height: gap),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var c = 0; c < columns; c++) ...[
+                  if (c > 0) SizedBox(width: gap),
+                  Expanded(
+                    child: i + c < children.length
+                        ? children[i + c]
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

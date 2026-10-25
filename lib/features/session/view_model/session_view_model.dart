@@ -89,11 +89,12 @@ class SessionViewModel extends Notifier<SessionModel?> {
   }
 
   /// Records the empty-room baseline: every device seen now is trusted.
-  Future<void> setBaseline(Set<String> deviceIds) =>
-      _updateActive((s) => s.copyWith(
-        trustedDeviceIds: {...s.trustedDeviceIds, ...deviceIds},
-        baselineAt: DateTime.now(),
-      ));
+  Future<void> setBaseline(Set<String> deviceIds) => _updateActive(
+    (s) => s.copyWith(
+      trustedDeviceIds: {...s.trustedDeviceIds, ...deviceIds},
+      baselineAt: DateTime.now(),
+    ),
+  );
 
   /// Marks one device as belonging to the room/invigilator.
   Future<void> trustDevice(String deviceId) => _updateActive(
@@ -101,9 +102,8 @@ class SessionViewModel extends Notifier<SessionModel?> {
   );
 
   Future<void> untrustDevice(String deviceId) => _updateActive(
-    (s) => s.copyWith(
-      trustedDeviceIds: {...s.trustedDeviceIds}..remove(deviceId),
-    ),
+    (s) =>
+        s.copyWith(trustedDeviceIds: {...s.trustedDeviceIds}..remove(deviceId)),
   );
 
   Future<void> setSeatLayout({required int rows, required int cols}) =>

@@ -6,6 +6,8 @@ import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/action_log/view/action_entry_screen.dart';
 import 'package:exam_guard/features/dashboard/view/dashboard_screen.dart';
+import 'package:exam_guard/features/hall/view/hall_scan_screen.dart';
+import 'package:exam_guard/features/hall/view/hall_screen.dart';
 import 'package:exam_guard/features/history/view/history_screen.dart';
 import 'package:exam_guard/features/magnetic/view/magnetic_scanner_screen.dart';
 import 'package:exam_guard/features/radar/view/seat_sweep_screen.dart';
@@ -23,8 +25,14 @@ import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 /// matches the exam state; a running exam always resumes on the dashboard
 /// (also after a restart).
 final appRouterProvider = Provider<GoRouter>((ref) {
+  // Refresh only when the redirect outcome can change. A refresh on every
+  // session edit (e.g. a logged incident) rebuilds pushed pages, so their
+  // pop no longer closes them.
   final sessionChanges = ValueNotifier<int>(0);
-  ref.listen(sessionViewModelProvider, (_, _) => sessionChanges.value++);
+  ref.listen(
+    sessionViewModelProvider.select((s) => (s != null, s?.isActive)),
+    (_, _) => sessionChanges.value++,
+  );
   ref.onDispose(sessionChanges.dispose);
 
   final router = GoRouter(
@@ -101,6 +109,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoute.history,
         builder: (context, state) => const HistoryScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.hall,
+        builder: (context, state) => const HallScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.hallScan,
+        builder: (context, state) => const HallScanScreen(),
       ),
     ],
   );
