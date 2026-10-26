@@ -116,6 +116,70 @@ class PdfImageItem {
 
 /// Content of a structured report: header band, meta grid, summary boxes,
 /// a multi-page table, signature blocks and a footer on every page.
+/// One line on a [PdfChart]: values over time.
+class PdfChartSeries {
+  const PdfChartSeries({
+    required this.label,
+    required this.color,
+    required this.points,
+    this.breakAfter,
+  });
+
+  final String label;
+  final Color color;
+  final List<(DateTime, double)> points;
+
+  /// A longer gap between two points breaks the line (no data there).
+  final Duration? breakAfter;
+}
+
+/// A dashed horizontal reference line, e.g. "near" at -65 dBm.
+class PdfChartLine {
+  const PdfChartLine(this.value, this.label);
+
+  final double value;
+  final String label;
+}
+
+/// A small time chart: lines over shaded bands, with reference lines.
+class PdfChart {
+  const PdfChart({
+    required this.title,
+    required this.start,
+    required this.end,
+    required this.minY,
+    required this.maxY,
+    required this.series,
+    required this.startLabel,
+    required this.endLabel,
+    this.subtitle,
+    this.bands = const [],
+    this.bandLabel,
+    this.refLines = const [],
+    this.note,
+  });
+
+  final String title;
+  final String? subtitle;
+  final DateTime start;
+  final DateTime end;
+  final double minY;
+  final double maxY;
+  final List<PdfChartSeries> series;
+
+  /// Time axis labels under the chart.
+  final String startLabel;
+  final String endLabel;
+
+  /// Shaded time spans (e.g. when a device was in range).
+  final List<(DateTime, DateTime)> bands;
+  final String? bandLabel;
+  final List<PdfChartLine> refLines;
+
+  /// Small print under the chart.
+  final String? note;
+}
+
 class PdfTableDocument {
   const PdfTableDocument({
     required this.title,
@@ -134,6 +198,10 @@ class PdfTableDocument {
     this.emptyTableText,
     this.gridTitle,
     this.grid,
+    this.overviewTitle,
+    this.overviewCharts = const [],
+    this.chartsTitle,
+    this.charts = const [],
     this.imagesTitle,
     this.images = const [],
     this.imageMissingText = 'Image not available',
@@ -175,6 +243,14 @@ class PdfTableDocument {
   /// Optional grid section (after the summary, before the table).
   final String? gridTitle;
   final PdfGrid? grid;
+
+  /// Charts after the summary / grid (e.g. activity over the exam).
+  final String? overviewTitle;
+  final List<PdfChart> overviewCharts;
+
+  /// Charts after the table (e.g. one per incident).
+  final String? chartsTitle;
+  final List<PdfChart> charts;
 
   /// Images with captions, two per row, after the table.
   final String? imagesTitle;

@@ -370,19 +370,19 @@ void main() {
   testWidgets('sensor error offers Retry, which restarts the sensor', (
     tester,
   ) async {
-      final h = await _pump(tester);
-      h.sensor.controller.addError(Exception('NO_SENSOR'));
-      await tester.pump();
-      await tester.pump();
-      expect(_state(tester).isSensorUnavailable, isTrue);
-      expect(find.text('NORMAL AMBIENT FIELD'), findsNothing);
-      // The subscription was cancelled on error; the user needs a way back.
-      expect(find.text('Retry'), findsOneWidget);
-      await tester.tap(find.text('Retry'));
-      await tester.pump();
-      await _emit(tester, h, 45);
-      expect(_state(tester).isLive, isTrue);
-      await _unmount(tester);
+    final h = await _pump(tester);
+    h.sensor.controller.addError(Exception('NO_SENSOR'));
+    await tester.pump();
+    await tester.pump();
+    expect(_state(tester).isSensorUnavailable, isTrue);
+    expect(find.text('NORMAL AMBIENT FIELD'), findsNothing);
+    // The subscription was cancelled on error; the user needs a way back.
+    expect(find.text('Retry'), findsOneWidget);
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    await _emit(tester, h, 45);
+    expect(_state(tester).isLive, isTrue);
+    await _unmount(tester);
   });
 
   testWidgets('paused: not-measuring banner with Resume, never "normal"', (
@@ -614,9 +614,7 @@ void main() {
     await _unmount(tester);
   });
 
-  testWidgets('back with nothing to pop goes to the dashboard', (
-    tester,
-  ) async {
+  testWidgets('back with nothing to pop goes to the dashboard', (tester) async {
     await _pump(tester);
     final popScope = tester.widget<PopScope>(
       find.descendant(

@@ -5,6 +5,7 @@ import 'package:exam_guard/core/services/storage/i_local_storage.dart';
 import 'package:exam_guard/features/action_log/view_model/action_entry_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -123,6 +124,15 @@ void main() {
 
     expect(result.status, ActionSaveStatus.failed);
     expect(result.message, isNot(contains('disk full')));
+  });
+
+  test('evidence never starts the scanner just to read history', () async {
+    final vm = container.read(actionEntryViewModelProvider.notifier);
+    expect(vm.evidenceFor('AA:BB'), isNull);
+    expect(container.exists(scannerViewModelProvider), isFalse);
+    await save(vm);
+    final log = container.read(sessionViewModelProvider)!.deviceLogs.single;
+    expect(log.evidence, isNull);
   });
 
   group('validation', () {

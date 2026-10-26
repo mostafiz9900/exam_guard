@@ -8,7 +8,10 @@ import 'package:exam_guard/core/utils/app_date_format.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/report/view/widgets/photo_viewer.dart';
 import 'package:exam_guard/features/report/view/widgets/severity_style.dart';
+import 'package:exam_guard/features/scanner/model/presence_tracker.dart';
+import 'package:exam_guard/features/scanner/view/widgets/signal_timeline_chart.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/session/model/incident_evidence.dart';
 
 /// One incident on the report: device, severity, seat, details, notes and
 /// evidence photo thumbnails (tap to view full screen).
@@ -134,6 +137,10 @@ class IncidentLogCard extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (log.evidence case final e? when e.trace.isNotEmpty) ...[
+                    SizedBox(height: AppDimens.spacingSmall),
+                    _Evidence(evidence: e, loggedAt: log.createdAt),
+                  ],
                   if (log.photoPaths.isNotEmpty) ...[
                     SizedBox(height: AppDimens.spacingExtraSmall),
                     Wrap(
@@ -207,6 +214,70 @@ class _Thumbnail extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The device's recorded signal before the incident was logged.
+class _Evidence extends StatelessWidget {
+  const _Evidence({required this.evidence, required this.loggedAt});
+
+  final IncidentEvidence evidence;
+  final DateTime loggedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final last = evidence.trace.last.at;
+    return Container(
+      key: const Key('report_incident_evidence'),
+      padding: EdgeInsets.all(AppDimens.spacingSmall),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(AppDimens.radiusSmall),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.show_chart_rounded, size: 16.w, color: colors.primary),
+              SizedBox(width: 4.w),
+              Text(
+                'report_evidence_title'.tr(),
+                style: textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 4.h),
+          SignalTimelineChart(
+            height: 80,
+            samples: [
+              for (final p in evidence.trace) SignalSample(p.at, p.rssi),
+            ],
+            intervals: [
+              for (final s in evidence.spans) PresenceInterval(s.start, s.end),
+            ],
+            from: evidence.trace.first.at,
+            to: loggedAt.isAfter(last) ? loggedAt : last,
+          ),
+          SizedBox(height: 4.h),
+          Text(
+            'report_evidence_summary'.tr(
+              args: {
+                'peak': '${evidence.peakRssi}',
+                'returns': '${evidence.reappearances}',
+              },
+            ),
+            style: textTheme.labelSmall?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }

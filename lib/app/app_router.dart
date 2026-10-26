@@ -9,6 +9,7 @@ import 'package:exam_guard/features/dashboard/view/dashboard_screen.dart';
 import 'package:exam_guard/features/hall/view/hall_scan_screen.dart';
 import 'package:exam_guard/features/hall/view/hall_screen.dart';
 import 'package:exam_guard/features/history/view/history_screen.dart';
+import 'package:exam_guard/features/lens_finder/view/lens_finder_screen.dart';
 import 'package:exam_guard/features/magnetic/view/magnetic_scanner_screen.dart';
 import 'package:exam_guard/features/radar/view/seat_sweep_screen.dart';
 import 'package:exam_guard/features/radar/view/tracking_radar_screen.dart';
@@ -117,6 +118,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoute.hallScan,
         builder: (context, state) => const HallScanScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.lensFinder,
+        builder: (context, state) => const LensFinderScreen(),
       ),
     ],
   );

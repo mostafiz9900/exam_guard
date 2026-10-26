@@ -123,7 +123,10 @@ void main() {
         .read(sessionViewModelProvider.notifier)
         .createSession(instituteName: 'S', teacherName: 'T', roomNumber: '1');
 
-    expect(storage.values.keys.where((k) => k.startsWith('session_')), hasLength(1));
+    expect(
+      storage.values.keys.where((k) => k.startsWith('session_')),
+      hasLength(1),
+    );
     expect(container.read(sessionViewModelProvider)?.roomNumber, '1');
   });
 }

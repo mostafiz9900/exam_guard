@@ -70,6 +70,7 @@ class ProfessionalDeviceCard extends HookWidget {
     this.isTrusted = false,
     this.hasNewAlert = false,
     this.isStale = false,
+    this.isToggling = false,
     this.secondsSinceSeen = 0,
     this.isSelecting = false,
     this.isSelected = false,
@@ -92,6 +93,9 @@ class ProfessionalDeviceCard extends HookWidget {
 
   /// Not heard for a while; shown muted until it is removed.
   final bool isStale;
+
+  /// Keeps disappearing and coming back (switched on and off).
+  final bool isToggling;
   final int secondsSinceSeen;
 
   /// Multi-select mode: a tap picks the card instead of opening details.
@@ -256,6 +260,12 @@ class ProfessionalDeviceCard extends HookWidget {
                                 text: manufacturerLabel(device.manufacturer),
                                 color: scheme.primary,
                               ),
+                              if (isToggling)
+                                _Tag(
+                                  icon: Icons.power_settings_new_rounded,
+                                  text: 'scan_toggling'.tr(),
+                                  color: Colors.orange.shade800,
+                                ),
                               if (device.isHighSuspicion)
                                 _Tag(
                                   icon: Icons.priority_high_rounded,

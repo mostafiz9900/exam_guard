@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'package:exam_guard/features/session/model/incident_evidence.dart';
+
 enum LogSeverity {
   critical('CRITICAL'),
   high('HIGH'),
@@ -30,6 +32,7 @@ class ActionLogModel {
     required this.createdAt,
     this.seat,
     this.photoPaths = const [],
+    this.evidence,
   });
 
   final String deviceName;
@@ -46,6 +49,9 @@ class ActionLogModel {
   /// Evidence photos saved on the device (absolute file paths).
   final List<String> photoPaths;
 
+  /// The device's recorded signal when the incident was logged, if known.
+  final IncidentEvidence? evidence;
+
   // Keys match the map format stored by earlier versions, so existing
   // Hive data still loads.
   Map<String, dynamic> toJson() => {
@@ -58,6 +64,7 @@ class ActionLogModel {
     'createdAt': createdAt.millisecondsSinceEpoch,
     'seat': seat,
     'photoPaths': photoPaths,
+    if (evidence != null) 'evidence': evidence!.toJson(),
   };
 
   factory ActionLogModel.fromJson(Map<String, dynamic> json) {
@@ -79,6 +86,7 @@ class ActionLogModel {
           for (final p in photos)
             if (p is String) p,
       ],
+      evidence: IncidentEvidence.fromJson(json['evidence']),
     );
   }
 }

@@ -9,6 +9,10 @@ import 'package:exam_guard/core/services/logger/app_logger.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
 import 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart';
 import 'package:exam_guard/features/scanner/model/new_device_alert.dart';
+import 'package:exam_guard/features/scanner/model/presence_tracker.dart';
+import 'package:exam_guard/features/scanner/model/room_equipment.dart';
+import 'package:exam_guard/features/session/model/activity_sample.dart';
+import 'package:exam_guard/features/session/model/room_profile.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_group.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/repository/scanner_repository.dart';
@@ -93,6 +97,7 @@ class ScannerState {
     this.selectedIds = const {},
     this.hasSeatLayout = false,
     this.identityVersion = 0,
+    this.togglingIds = const {},
   }) : _groups = groups;
 
   /// Most devices the walk finder follows at once.
@@ -183,6 +188,10 @@ class ScannerState {
   /// physical device changes (an address rotated, or the members of a
   /// group changed). Finders re-read [ScannerViewModel.aliasesOf] then.
   final int identityVersion;
+
+  /// BLE devices that keep disappearing and coming back (switched on and
+  /// off to dodge the scan). See [PresenceTracker].
+  final Set<String> togglingIds;
 
   bool get hasBaseline => baselineAt != null;
 
@@ -338,6 +347,7 @@ class ScannerState {
     Set<String>? selectedIds,
     bool? hasSeatLayout,
     int? identityVersion,
+    Set<String>? togglingIds,
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
@@ -368,6 +378,7 @@ class ScannerState {
       selectedIds: selectedIds ?? this.selectedIds,
       hasSeatLayout: hasSeatLayout ?? this.hasSeatLayout,
       identityVersion: identityVersion ?? this.identityVersion,
+      togglingIds: togglingIds ?? this.togglingIds,
     );
   }
 }
@@ -435,6 +446,8 @@ class ScannerViewModel extends Notifier<ScannerState> {
   StreamSubscription<BleScanError?>? _problemSub;
   StreamSubscription<WifiScanProblem?>? _wifiProblemSub;
   Timer? _evictTimer;
+  Timer? _activityTimer;
+  static const Duration _activityEvery = Duration(minutes: 1);
   Timer? _nameLookupTimer;
   final Set<String> _nameLookupTried = {};
   String? _nameLookupId;
@@ -453,6 +466,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
   int _nextAppearance = 0;
 
   final RssiSmoother _smoother = RssiSmoother();
+  final PresenceTracker _presence = PresenceTracker();
   final Map<String, ProximityBand> _bands = {};
   final StickyDeviceGrouper _grouper = StickyDeviceGrouper();
   final NearestOrder _nearest = NearestOrder();
@@ -643,7 +657,55 @@ class ScannerViewModel extends Notifier<ScannerState> {
       _localBaselineAt = _now();
     }
     if (ref.mounted) _applyTrust();
+    await _rememberRoomEquipment();
     return ids.length;
+  }
+
+  /// Saves the fixed equipment seen now to this room's profile, so the
+  /// next exam in the room starts with it trusted.
+  Future<void> _rememberRoomEquipment() async {
+    final items = [
+      for (final d in _live.values)
+        if (isRoomEquipment(d))
+          RoomProfileItem(
+            id: d.id,
+            name: d.displayName,
+            type: d.deviceType,
+            transport: d.transport.name,
+          ),
+    ];
+    try {
+      await ref
+          .read(sessionViewModelProvider.notifier)
+          .rememberRoomEquipment(items);
+    } catch (e, st) {
+      _logger.warning('Room profile not saved', e, st);
+    }
+  }
+
+  /// Records how busy the hall is now, for the report's activity chart.
+  @visibleForTesting
+  Future<void> recordActivityNow() async {
+    if (!ref.mounted || !state.isScanning) return;
+    final now = _now();
+    final present = [
+      for (final d in _live.values)
+        if (!_isStaleAt(d, now)) d,
+    ];
+    try {
+      await ref
+          .read(sessionViewModelProvider.notifier)
+          .addActivitySample(
+            ActivitySample(
+              at: now,
+              devices: present.length,
+              untrusted: present.where((d) => !state.isTrusted(d.id)).length,
+              alerts: state.alerts.length,
+            ),
+          );
+    } catch (e, st) {
+      _logger.warning('Activity sample not saved', e, st);
+    }
   }
 
   /// Trusts [deviceId] and every other address grouped with it. Its alert
@@ -875,8 +937,15 @@ class ScannerViewModel extends Notifier<ScannerState> {
       bands: Map.unmodifiable(_bands),
       asOf: now,
       selectedIds: selected,
+      togglingIds: {
+        for (final id in _presence.togglingIds(now))
+          if (_live.containsKey(id)) id,
+      },
     );
   }
+
+  /// Presence and signal history of [id] (also after it left), or null.
+  DeviceHistory? historyOf(String id) => _presence.historyOf(id);
 
   int _appearanceOf(ScannedDeviceGroup g) => g.members
       .map((m) => _appearance[m.id] ?? 1 << 30)
@@ -914,6 +983,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
 
   void _forgetAll() {
     _nameLookupTried.clear();
+    _presence.clear();
     _live.clear();
     _appearance.clear();
     _smoother.clear();
@@ -1043,6 +1113,11 @@ class ScannerViewModel extends Notifier<ScannerState> {
     _evictTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _evictStaleDevices();
     });
+    _activityTimer?.cancel();
+    _activityTimer = Timer.periodic(
+      _activityEvery,
+      (_) => unawaited(recordActivityNow()),
+    );
     unawaited(_loadKnownNames());
     _nameLookupsLeft = _maxNameLookups;
     _nameLookupTimer?.cancel();
@@ -1139,6 +1214,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
           d.id,
     ];
     gone.forEach(_forget);
+    _presence.prune(now);
     final anyStale = _live.values.any((d) => _isStaleAt(d, now));
     if (gone.isNotEmpty || anyStale || state.staleIds.isNotEmpty) _publish();
   }
@@ -1267,6 +1343,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
 
     if (rotatedFrom != null) {
       _recordRotation(rotatedFrom.id, seen.id);
+      _presence.alias(rotatedFrom.id, seen.id);
       _inheritFromRotated(rotatedFrom.id, seen.id);
       // The new address takes the old card's place in the list.
       final place = _appearance[rotatedFrom.id];
@@ -1279,6 +1356,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
       _live[seen.id] = device;
     }
     _smoother.add(seen.id, seen.rssi);
+    _presence.record(seen.id, seen.rssi, _now());
 
     // Appearing (or replacing) devices show at once; value updates are
     // coalesced.
@@ -1326,6 +1404,7 @@ class ScannerViewModel extends Notifier<ScannerState> {
           );
     final named = _withKnownName(device);
     existing == null ? _addNew(named) : _live[named.id] = named;
+    _presence.record(seen.id, seen.rssi, _now(), canToggle: false);
     _publish();
     _maybeAlert(named);
   }
@@ -1339,8 +1418,10 @@ class ScannerViewModel extends Notifier<ScannerState> {
         else
           seen,
     ];
+    final now = _now();
     for (final d in merged) {
       _live.containsKey(d.id) ? _live[d.id] = d : _addNew(d);
+      _presence.record(d.id, d.rssi, now, canToggle: false);
     }
     _publish();
     for (final d in merged) {
@@ -1481,6 +1562,8 @@ class ScannerViewModel extends Notifier<ScannerState> {
   void _stop({bool keepAdapterListener = false}) {
     _evictTimer?.cancel();
     _evictTimer = null;
+    _activityTimer?.cancel();
+    _activityTimer = null;
     _nameLookupTimer?.cancel();
     _nameLookupTimer = null;
     _sightingsSub?.cancel();

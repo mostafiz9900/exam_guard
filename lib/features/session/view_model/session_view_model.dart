@@ -1,5 +1,8 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/features/session/model/activity_sample.dart';
+import 'package:exam_guard/features/session/model/room_profile.dart';
+import 'package:exam_guard/features/session/repository/room_profile_repository.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 import 'package:exam_guard/features/session/repository/session_repository.dart';
@@ -15,10 +18,12 @@ class NoActiveSessionException implements Exception {
 /// The running exam, or the exam whose report is being viewed, or null.
 class SessionViewModel extends Notifier<SessionModel?> {
   late SessionRepository _repository;
+  late RoomProfileRepository _profiles;
 
   @override
   SessionModel? build() {
     _repository = ref.watch(sessionRepositoryProvider);
+    _profiles = ref.watch(roomProfileRepositoryProvider);
     return _repository.activeSession();
   }
 
@@ -37,6 +42,8 @@ class SessionViewModel extends Notifier<SessionModel?> {
     if (running != null && running.isActive) {
       await _repository.save(running.copyWith(endTime: DateTime.now()));
     }
+    // This room's remembered equipment starts out trusted.
+    final profile = _profiles.load(roomNumber);
     final session = SessionModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       instituteName: instituteName,
@@ -45,6 +52,8 @@ class SessionViewModel extends Notifier<SessionModel?> {
       startTime: DateTime.now(),
       seatRows: seatRows,
       seatCols: seatCols,
+      trustedDeviceIds: profile?.ids ?? const {},
+      profileDeviceIds: profile?.ids ?? const {},
     );
     await _repository.save(session);
     state = session;
@@ -95,6 +104,55 @@ class SessionViewModel extends Notifier<SessionModel?> {
       baselineAt: DateTime.now(),
     ),
   );
+
+  /// Saved equipment of [room] (or the running exam's room), or null.
+  RoomProfile? roomProfile([String? room]) =>
+      _profiles.load(room ?? state?.roomNumber ?? '');
+
+  /// Adds [items] to the running exam's room profile (after a baseline);
+  /// returns how many devices the profile now holds.
+  Future<int> rememberRoomEquipment(List<RoomProfileItem> items) async {
+    final s = state;
+    if (s == null || items.isEmpty) return roomProfile()?.items.length ?? 0;
+    final merged = {
+      for (final i in roomProfile()?.items ?? const <RoomProfileItem>[])
+        i.id: i,
+      for (final i in items) i.id: i,
+    };
+    await _profiles.save(
+      RoomProfile(
+        room: s.roomNumber,
+        savedAt: DateTime.now(),
+        items: merged.values.toList(),
+      ),
+    );
+    return merged.length;
+  }
+
+  /// Removes one remembered device (it stays trusted in this exam).
+  Future<void> forgetRoomEquipment(String deviceId) async {
+    final p = roomProfile();
+    if (p == null) return;
+    final rest = [
+      for (final i in p.items)
+        if (i.id != deviceId) i,
+    ];
+    if (rest.isEmpty) {
+      await _profiles.delete(p.room);
+    } else {
+      await _profiles.save(
+        RoomProfile(room: p.room, savedAt: DateTime.now(), items: rest),
+      );
+    }
+  }
+
+  /// Forgets everything remembered for [room] (default: this exam's room).
+  Future<void> forgetRoomProfile([String? room]) =>
+      _profiles.delete(room ?? state?.roomNumber ?? '');
+
+  /// Appends one "devices in range" sample to the running exam.
+  Future<void> addActivitySample(ActivitySample sample) =>
+      _updateActive((s) => s.copyWith(activity: [...s.activity, sample]));
 
   /// Marks one device as belonging to the room/invigilator.
   Future<void> trustDevice(String deviceId) => _updateActive(

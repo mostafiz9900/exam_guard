@@ -93,7 +93,6 @@ final screens = [
 // ---------------------------------------------------------------- fakes
 
 class FakeBluetooth implements IBluetoothService {
-
   @override
   Future<Map<String, String>> knownDeviceNames() async => const {};
   final _records = StreamController<BleScanRecord>.broadcast();

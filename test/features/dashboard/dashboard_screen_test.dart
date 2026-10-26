@@ -422,14 +422,11 @@ void main() {
       Size(800, 360),
       Size(1280, 800),
     ]) {
-      testWidgets(
-        'module grid does not overflow at ${size.width.toInt()}x'
-        '${size.height.toInt()}',
-        (tester) async {
-          await _pump(tester, size: size);
-          expect(tester.takeException(), isNull);
-        },
-      );
+      testWidgets('module grid does not overflow at ${size.width.toInt()}x'
+          '${size.height.toInt()}', (tester) async {
+        await _pump(tester, size: size);
+        expect(tester.takeException(), isNull);
+      });
     }
 
     testWidgets('without a running exam shows "No active session" and no '

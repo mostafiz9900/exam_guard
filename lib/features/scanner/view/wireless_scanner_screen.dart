@@ -233,6 +233,9 @@ class WirelessScannerScreen extends HookConsumerWidget {
                 isTrusted: state.isGroupTrusted(group),
                 hasNewAlert: state.hasUnacknowledgedAlert(group),
                 isStale: state.isGroupStale(group),
+                isToggling: group.members.any(
+                  (m) => state.togglingIds.contains(m.id),
+                ),
                 secondsSinceSeen: state.secondsSinceSeen(group.primary),
                 isSelecting: state.isSelecting,
                 isSelected: state.isGroupSelected(group),
@@ -460,6 +463,7 @@ void inspectDevice(
     onSeatSweep: state.canSeatSweep(device)
         ? () => context.pushTo(AppRoute.seatSweep, extra: device)
         : null,
+    history: notifier.historyOf(device.id),
     onConnect: () => notifier.probeDeviceConnection(device.id),
     onToggleTrust: () => isTrusted
         ? notifier.untrustDevice(device.id)

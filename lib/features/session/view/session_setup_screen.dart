@@ -12,6 +12,8 @@ import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
 import 'package:exam_guard/core/widgets/custom_text_field.dart';
+import 'package:exam_guard/features/session/model/room_profile.dart';
+import 'package:exam_guard/features/session/repository/room_profile_repository.dart';
 import 'package:exam_guard/features/session/model/session_form_validator.dart';
 import 'package:exam_guard/features/session/view/widgets/exam_hall_backdrop.dart';
 import 'package:exam_guard/features/session/view/widgets/seat_layout_fields.dart';
@@ -266,6 +268,10 @@ class SessionSetupScreen extends HookConsumerWidget {
               textInputAction: TextInputAction.next,
               autovalidateMode: autovalidate,
               prefixIcon: const Icon(Icons.meeting_room_outlined),
+            ),
+            _SavedRoomHint(
+              controller: roomController,
+              profileOf: ref.read(roomProfileRepositoryProvider).load,
             ),
             gap,
             CustomTextField(
@@ -657,6 +663,55 @@ class _FixBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "Saved room · 9 known devices" under the room field when this room has
+/// remembered equipment.
+class _SavedRoomHint extends StatelessWidget {
+  const _SavedRoomHint({required this.controller, required this.profileOf});
+
+  final TextEditingController controller;
+  final RoomProfile? Function(String room) profileOf;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final profile = profileOf(controller.text);
+        if (profile == null) return const SizedBox.shrink();
+        final colors = Theme.of(context).colorScheme;
+        return Container(
+          key: const Key('setup_saved_room'),
+          margin: EdgeInsets.only(top: 4.h),
+          padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
+          decoration: BoxDecoration(
+            color: colors.primaryContainer.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(AppDimens.radiusSmall),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.inventory_2_outlined,
+                size: 16.w,
+                color: colors.primary,
+              ),
+              SizedBox(width: 8.w),
+              Expanded(
+                child: Text(
+                  'setup_saved_room'.tr(
+                    args: {'count': '${profile.items.length}'},
+                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: colors.onPrimaryContainer),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -26,7 +26,6 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeBluetooth implements IBluetoothService {
-
   @override
   Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();

@@ -166,7 +166,10 @@ void main() {
         await tester.enterText(find.byKey(const Key('seat_rows')), '40');
         await tester.ensureVisible(find.byKey(const Key('setup_room')));
         await tester.pump();
-        await tester.tap(find.byKey(const Key('setup_start')), warnIfMissed: false);
+        await tester.tap(
+          find.byKey(const Key('setup_start')),
+          warnIfMissed: false,
+        );
         // Errors fade in; the screen scrolls to the first field to fix.
         for (var i = 0; i < 5; i++) {
           await tester.pump(const Duration(milliseconds: 150));

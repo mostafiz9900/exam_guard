@@ -30,14 +30,16 @@ void main() {
     expect(groupLikelySameDevices([a, b]), hasLength(2));
   });
 
-  test('labelled as an Apple device and matched by audio and phone filters',
-      () {
-    final d = _hidden('AA:BB:CC:DD:EE:01', -45, now);
-    expect(d.displayName, startsWith('Apple Device'));
-    expect(DeviceFilter.audioDevices.matches(d), isTrue);
-    expect(DeviceFilter.smartphones.matches(d), isTrue);
-    expect(DeviceFilter.wifiHotspots.matches(d), isFalse);
-  });
+  test(
+    'labelled as an Apple device and matched by audio and phone filters',
+    () {
+      final d = _hidden('AA:BB:CC:DD:EE:01', -45, now);
+      expect(d.displayName, startsWith('Apple Device'));
+      expect(DeviceFilter.audioDevices.matches(d), isTrue);
+      expect(DeviceFilter.smartphones.matches(d), isTrue);
+      expect(DeviceFilter.wifiHotspots.matches(d), isFalse);
+    },
+  );
 
   test('scan records are not hidden unless the OS says so', () {
     final r = BleScanRecord(

@@ -4,6 +4,7 @@
 import 'package:meta/meta.dart';
 
 import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/session/model/activity_sample.dart';
 
 @immutable
 class SessionModel {
@@ -26,6 +27,12 @@ class SessionModel {
   final int? seatRows;
   final int? seatCols;
 
+  /// Room equipment pre-trusted from this room's saved profile.
+  final Set<String> profileDeviceIds;
+
+  /// Devices-in-range samples over the exam (about one a minute).
+  final List<ActivitySample> activity;
+
   bool get hasBaseline => baselineAt != null;
   bool get hasSeatLayout => (seatRows ?? 0) > 0 && (seatCols ?? 0) > 0;
 
@@ -47,6 +54,8 @@ class SessionModel {
     this.baselineAt,
     this.seatRows,
     this.seatCols,
+    this.profileDeviceIds = const {},
+    this.activity = const [],
   });
 
   SessionModel copyWith({
@@ -61,6 +70,8 @@ class SessionModel {
     DateTime? baselineAt,
     int? seatRows,
     int? seatCols,
+    Set<String>? profileDeviceIds,
+    List<ActivitySample>? activity,
   }) {
     return SessionModel(
       id: id ?? this.id,
@@ -74,6 +85,8 @@ class SessionModel {
       baselineAt: baselineAt ?? this.baselineAt,
       seatRows: seatRows ?? this.seatRows,
       seatCols: seatCols ?? this.seatCols,
+      profileDeviceIds: profileDeviceIds ?? this.profileDeviceIds,
+      activity: activity ?? this.activity,
     );
   }
 
@@ -89,6 +102,8 @@ class SessionModel {
     'baselineAt': baselineAt?.millisecondsSinceEpoch,
     'seatRows': seatRows,
     'seatCols': seatCols,
+    'profileDeviceIds': profileDeviceIds.toList(),
+    'activity': [for (final a in activity) a.toJson()],
   };
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
@@ -122,6 +137,15 @@ class SessionModel {
           : null,
       seatRows: json['seatRows'] as int?,
       seatCols: json['seatCols'] as int?,
+      profileDeviceIds: {
+        if (json['profileDeviceIds'] case final List ids)
+          for (final id in ids)
+            if (id is String) id,
+      },
+      activity: [
+        if (json['activity'] case final List samples)
+          for (final a in samples) ?ActivitySample.fromJson(a),
+      ],
     );
   }
 

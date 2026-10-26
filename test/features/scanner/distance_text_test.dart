@@ -78,10 +78,7 @@ void main() {
       tester,
     ) async {
       await pumpEn(tester);
-      expect(
-        signalSummaryText(-71, DeviceTransport.ble),
-        '≈3 m away',
-      );
+      expect(signalSummaryText(-71, DeviceTransport.ble), '≈3 m away');
       expect(signalSummaryText(-71, DeviceTransport.wifi), '-71 dBm');
       expect(signalSummaryText(-71, DeviceTransport.classic), '-71 dBm');
     });

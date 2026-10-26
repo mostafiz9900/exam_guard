@@ -24,6 +24,8 @@ import 'package:exam_guard/features/report/view/widgets/seat_heat_map.dart';
 import 'package:exam_guard/features/report/view/widgets/severity_style.dart';
 import 'package:exam_guard/features/report/view_model/report_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/session/model/activity_sample.dart';
+import 'package:exam_guard/features/session/model/incident_evidence.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 import 'package:flutter/material.dart';
@@ -414,6 +416,56 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('evidence chart on the incident and exam activity chart', (
+    tester,
+  ) async {
+    final withEvidence = ActionLogModel(
+      deviceName: 'TWS Earbud',
+      deviceId: 'AA:01',
+      category: 'Bluetooth Device',
+      severity: LogSeverity.high,
+      location: 'Desk',
+      notes: '',
+      createdAt: _start.add(const Duration(minutes: 10)),
+      evidence: IncidentEvidence(
+        trace: [
+          for (var s = 0; s < 120; s += 5)
+            EvidencePoint(_start.add(Duration(minutes: 8, seconds: s)), -62),
+        ],
+        spans: [
+          EvidenceSpan(
+            _start.add(const Duration(minutes: 8)),
+            _start.add(const Duration(minutes: 10)),
+          ),
+        ],
+        firstSeen: _start.add(const Duration(minutes: 8)),
+        peakRssi: -58,
+        reappearances: 2,
+        timePresent: const Duration(minutes: 2),
+      ),
+    );
+    final session = _session(logs: [withEvidence]).copyWith(
+      activity: [
+        for (var m = 0; m < 30; m += 5)
+          ActivitySample(
+            at: _start.add(Duration(minutes: m)),
+            devices: 3 + m ~/ 5,
+            untrusted: m ~/ 10,
+            alerts: 0,
+          ),
+      ],
+    );
+    await _pump(tester, show: session);
+    expect(find.byKey(const Key('report_activity_chart')), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('report_incident_evidence')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.textContaining('-58 dBm'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('heat map shows counts per seat and opens a seat\'s incidents', (
     tester,

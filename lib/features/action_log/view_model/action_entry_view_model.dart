@@ -7,7 +7,9 @@ import 'package:exam_guard/core/services/share/i_share_service.dart';
 import 'package:exam_guard/features/action_log/model/seat_map.dart';
 import 'package:exam_guard/features/action_log/repository/action_log_repository.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
+import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/session/model/incident_evidence.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
 
 class ActionEntryState {
@@ -193,6 +195,32 @@ class ActionEntryViewModel extends Notifier<ActionEntryState> {
       createdAt: DateTime.now(),
       seat: seatId.isEmpty ? null : seatId,
       photoPaths: List.unmodifiable(photoPaths),
+      evidence: evidenceFor(deviceId),
+    );
+  }
+
+  /// The scanner's recorded signal for [deviceId] over the last
+  /// [IncidentEvidence.window], or null. Never starts a scan to get it.
+  IncidentEvidence? evidenceFor(String deviceId) {
+    final id = deviceId.trim();
+    if (id.isEmpty || !ref.exists(scannerViewModelProvider)) return null;
+    final h = ref.read(scannerViewModelProvider.notifier).historyOf(id);
+    if (h == null) return null;
+    final from = DateTime.now().subtract(IncidentEvidence.window);
+    return IncidentEvidence(
+      trace: [
+        for (final s in h.samples)
+          if (!s.at.isBefore(from)) EvidencePoint(s.at, s.rssi),
+      ],
+      spans: [
+        for (final i in h.intervals)
+          if (i.end.isAfter(from))
+            EvidenceSpan(i.start.isBefore(from) ? from : i.start, i.end),
+      ],
+      firstSeen: h.firstSeen,
+      peakRssi: h.peakRssi,
+      reappearances: h.reappearances.length,
+      timePresent: h.timePresent,
     );
   }
 

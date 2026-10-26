@@ -15,7 +15,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class _Bluetooth implements IBluetoothService {
-
   @override
   Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();
@@ -379,6 +378,33 @@ void main() {
       addTearDown(container.dispose);
       container.listen(scannerViewModelProvider, (_, _) {});
       await pumpEventQueue();
+    });
+
+    test('a device that keeps disappearing is flagged as toggling', () async {
+      await hear('T', -60);
+      await hear('S', -60);
+      for (var i = 0; i < 3; i++) {
+        now = now.add(const Duration(seconds: 40));
+        await hear('T', -60);
+        await hear('S', -60);
+      }
+      await publishWindow();
+      // S was heard just as often, but both reappeared: same pattern means
+      // both toggle. A steady device must not be flagged.
+      expect(read().togglingIds, containsAll(['T', 'S']));
+      final h = vm().historyOf('T')!;
+      expect(h.reappearances, hasLength(3));
+      expect(h.intervals, hasLength(4));
+    });
+
+    test('a steadily heard device is never toggling', () async {
+      for (var i = 0; i < 20; i++) {
+        now = now.add(const Duration(seconds: 10));
+        await hear('S', -60);
+      }
+      await publishWindow();
+      expect(read().togglingIds, isEmpty);
+      expect(vm().historyOf('S')!.intervals, hasLength(1));
     });
 
     test('stable order: new devices are appended at the bottom', () async {

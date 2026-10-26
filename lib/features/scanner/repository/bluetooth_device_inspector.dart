@@ -140,6 +140,22 @@ class BluetoothDeviceInspector {
         : u;
   }
 
+  /// Names of covert exam earpieces: induction neck loops, "spy" / "nano"
+  /// earpieces and hands-free kits. Whole words only, so e.g. "Loopy" or an
+  /// "Arduino Nano" board don't match.
+  static final RegExp _spyName = RegExp(
+    r'(neck[\s_-]?loop|\bloop\b|induction|\bspy\b|\bnano\b|'
+    r'hands?[\s_-]?free)',
+    caseSensitive: false,
+  );
+
+  /// True when [name] looks like a covert earpiece / loop.
+  static bool isSpyEarpieceName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('arduino') || lower.contains('ipod')) return false;
+    return _spyName.hasMatch(lower);
+  }
+
   /// Categorizes device into specific Exam Security Category
   static String resolveDeviceType(
     String name,
@@ -171,7 +187,8 @@ class BluetoothDeviceInspector {
     }
 
     // 2. Detect Smart Earpieces / Earbuds / Headphones
-    if (lowerName.contains('earbud') ||
+    if (isSpyEarpieceName(name) ||
+        lowerName.contains('earbud') ||
         lowerName.contains('earphone') ||
         lowerName.contains('earpiece') ||
         lowerName.contains('bud') ||

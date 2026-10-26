@@ -147,7 +147,9 @@ class ScannerRepository {
       lastSeen: r.timestamp,
       firstSeen: r.timestamp,
       transport: DeviceTransport.classic,
-      isHighSuspicion: WirelessClassifier.isSpyEarpieceClass(r.deviceClass),
+      isHighSuspicion:
+          WirelessClassifier.isSpyEarpieceClass(r.deviceClass) ||
+          BluetoothDeviceInspector.isSpyEarpieceName(name),
     );
   }
 
@@ -209,6 +211,7 @@ class ScannerRepository {
       serviceUuids: serviceUuids,
       lastSeen: record.timestamp,
       firstSeen: record.timestamp,
+      isHighSuspicion: BluetoothDeviceInspector.isSpyEarpieceName(profile.name),
     );
   }
 }

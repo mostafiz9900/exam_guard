@@ -191,3 +191,8 @@
 - **What Happens**: BoxShadow / Material elevation render as hard grey/black bands in `toImage` captures of widget tests.
 - **How to Avoid**: For sheets/cards that must look clean everywhere, use a thin `outlineVariant` border instead of a shadow (setup screen does). The setup header art is `ExamHallBackdrop` (CustomPainter, no image asset); its radar sweep repeats via `useEffect` and stops with reduced motion.
 - **Discovered**: 2026-10-25
+
+#### scanner — Don't claim "AirPods in ear"
+- **What Happens**: Apple's proximity-pairing status byte is undocumented; open-source decoders (LibrePods, LinuxPods, OpenPods) disagree on the bits and captures have contradicted them; AirPods 4 reportedly don't send it.
+- **How to Avoid**: Only identify AirPods (type 0x07). Never show in-ear/in-case status — a wrong claim could accuse a student. Covert earpiece names (`BluetoothDeviceInspector.isSpyEarpieceName`: loop / neckloop / induction / spy / nano / hands-free, whole words, not Arduino/iPod) set `isHighSuspicion`.
+- **Discovered**: 2026-10-26

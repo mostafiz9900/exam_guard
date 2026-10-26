@@ -31,7 +31,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ---------------------------------------------------------------- fakes
 
 class _FakeBluetooth implements IBluetoothService {
-
   @override
   Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();
@@ -226,21 +225,17 @@ class _MemoryStorage implements ILocalStorage {
   Future<void> dispose() async {}
 }
 
-BleScanRecord _packet(
-  String id,
-  int rssi, {
-  String name = '',
-  DateTime? at,
-}) => BleScanRecord(
-  id: id,
-  name: name,
-  rssi: rssi,
-  txPower: null,
-  isConnectable: true,
-  serviceUuids: const [],
-  manufacturerData: const {},
-  timestamp: at ?? DateTime.now(),
-);
+BleScanRecord _packet(String id, int rssi, {String name = '', DateTime? at}) =>
+    BleScanRecord(
+      id: id,
+      name: name,
+      rssi: rssi,
+      txPower: null,
+      isConnectable: true,
+      serviceUuids: const [],
+      manufacturerData: const {},
+      timestamp: at ?? DateTime.now(),
+    );
 
 // ---------------------------------------------------------------- harness
 
@@ -296,9 +291,7 @@ class _Harness {
           path: AppRoute.actionNew,
           builder: (context, routerState) {
             pushedArgs.add(routerState.extra as ActionEntryArgs?);
-            return Scaffold(
-              appBar: AppBar(title: const Text('incident form')),
-            );
+            return Scaffold(appBar: AppBar(title: const Text('incident form')));
           },
         ),
         GoRoute(
@@ -341,7 +334,9 @@ class _Harness {
         ),
       ),
     );
-    final target = viaHome ? find.text('open rf') : find.byType(RfDetectorScreen);
+    final target = viaHome
+        ? find.text('open rf')
+        : find.byType(RfDetectorScreen);
     for (var i = 0; i < 40 && target.evaluate().isEmpty; i++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -377,9 +372,9 @@ class _Harness {
 
 /// The big dBm read-out inside the gauge.
 Text _gaugeText(WidgetTester tester) {
-  final texts = tester.widgetList<Text>(find.byType(Text)).where(
-    (t) => t.style?.fontFamily == 'monospace',
-  );
+  final texts = tester
+      .widgetList<Text>(find.byType(Text))
+      .where((t) => t.style?.fontFamily == 'monospace');
   return texts.single;
 }
 
@@ -401,29 +396,30 @@ void main() {
   // ------------------------------------------------------------ rendering
 
   for (final mode in [ThemeMode.light, ThemeMode.dark]) {
-    testWidgets('renders live meter on a small phone without overflow ($mode)', (
-      tester,
-    ) async {
-      final h = _Harness();
-      await h.pump(tester, mode: mode);
-      expect(find.text('RF activity meter'), findsOneWidget);
-      expect(find.text('LIVE'), findsOneWidget);
-      expect(find.text('QUIET (below -70 dBm)'), findsOneWidget);
-      expect(find.text('Retry'), findsNothing);
-      // Scroll through everything to lay it all out.
-      await tester.drag(
-        find.byType(SingleChildScrollView).first,
-        const Offset(0, -2000),
-      );
-      await tester.pump();
-      expect(find.text('Log incident'), findsOneWidget);
-      expect(tester.takeException(), isNull);
+    testWidgets(
+      'renders live meter on a small phone without overflow ($mode)',
+      (tester) async {
+        final h = _Harness();
+        await h.pump(tester, mode: mode);
+        expect(find.text('RF activity meter'), findsOneWidget);
+        expect(find.text('LIVE'), findsOneWidget);
+        expect(find.text('QUIET (below -70 dBm)'), findsOneWidget);
+        expect(find.text('Retry'), findsNothing);
+        // Scroll through everything to lay it all out.
+        await tester.drag(
+          find.byType(SingleChildScrollView).first,
+          const Offset(0, -2000),
+        );
+        await tester.pump();
+        expect(find.text('Log incident'), findsOneWidget);
+        expect(tester.takeException(), isNull);
 
-      // Strong signal state renders too.
-      await h.feed(tester, [_packet('AA', -40, name: 'Hidden earbud')]);
-      expect(tester.takeException(), isNull);
-      await _leaveScreen(tester);
-    });
+        // Strong signal state renders too.
+        await h.feed(tester, [_packet('AA', -40, name: 'Hidden earbud')]);
+        expect(tester.takeException(), isNull);
+        await _leaveScreen(tester);
+      },
+    );
 
     testWidgets('not-measuring state renders without overflow ($mode)', (
       tester,
@@ -447,9 +443,9 @@ void main() {
       expect(_textContaining('NOT MEASURING'), findsOneWidget);
       expect(_gaugeText(tester).data, '--');
       // Grey, not the green "all clear".
-      final outline = Theme.of(
-        tester.element(find.byType(RfDetectorScreen)),
-      ).colorScheme.outline;
+      final outline = Theme.of(tester.element(find.byType(RfDetectorScreen)))
+          .colorScheme
+          .outline;
       expect(_gaugeText(tester).style?.color, outline);
       expect(_gaugeText(tester).style?.color, isNot(_quietGreen));
     }
@@ -522,8 +518,10 @@ void main() {
       await tester.pump();
       expectNotQuiet(tester, h);
       expect(_textContaining('Location is off'), findsOneWidget);
-      expect(find.textContaining('Measuring resumes automatically'),
-          findsOneWidget);
+      expect(
+        find.textContaining('Measuring resumes automatically'),
+        findsOneWidget,
+      );
       expect(find.text('Retry'), findsNothing);
       expect(h.buzzer.beeping, isFalse);
 
@@ -545,26 +543,28 @@ void main() {
       await _leaveScreen(tester);
     });
 
-    testWidgets('Location off reported by startScan keeps the scan registered',
-        (tester) async {
-      final h = _Harness()
-        ..bluetooth.startError = const BleScanException(
-          'Location off',
-          code: BleScanError.locationOff,
-        );
-      await h.pump(tester);
-      expect(h.state.isLocationOff, isTrue);
-      expect(h.state.isScanning, isTrue);
-      expect(h.state.isMeasuring, isFalse);
-      expect(find.text('Turn on Location'), findsOneWidget);
-      expect(find.textContaining('QUIET'), findsNothing);
+    testWidgets(
+      'Location off reported by startScan keeps the scan registered',
+      (tester) async {
+        final h = _Harness()
+          ..bluetooth.startError = const BleScanException(
+            'Location off',
+            code: BleScanError.locationOff,
+          );
+        await h.pump(tester);
+        expect(h.state.isLocationOff, isTrue);
+        expect(h.state.isScanning, isTrue);
+        expect(h.state.isMeasuring, isFalse);
+        expect(find.text('Turn on Location'), findsOneWidget);
+        expect(find.textContaining('QUIET'), findsNothing);
 
-      h.bluetooth.problems.add(null);
-      await tester.pump();
-      await tester.pump();
-      expect(h.state.isMeasuring, isTrue);
-      await _leaveScreen(tester);
-    });
+        h.bluetooth.problems.add(null);
+        await tester.pump();
+        await tester.pump();
+        expect(h.state.isMeasuring, isTrue);
+        await _leaveScreen(tester);
+      },
+    );
   });
 
   // -------------------------------------------------------- threat levels
@@ -827,9 +827,7 @@ void main() {
   // --------------------------------------------- view-model branch coverage
 
   group('view model', () {
-    testWidgets('adapter unauthorized / unavailable / unknown', (
-      tester,
-    ) async {
+    testWidgets('adapter unauthorized / unavailable / unknown', (tester) async {
       final h = _Harness();
       await h.pump(tester);
       h.bluetooth.adapter.add(BleAdapterStatus.unknown);
@@ -877,10 +875,7 @@ void main() {
       final h = _Harness()..bluetooth.startError = StateError('boom');
       await h.pump(tester);
       expect(h.state.errorKey, RfDetectorViewModel.scanStartErrorKey);
-      expect(
-        find.text('Could not start the Bluetooth scan.'),
-        findsOneWidget,
-      );
+      expect(find.text('Could not start the Bluetooth scan.'), findsOneWidget);
       expect(h.vm.incidentNotes(), contains('could not start'));
       await _leaveScreen(tester);
     });

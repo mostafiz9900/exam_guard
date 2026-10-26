@@ -44,7 +44,6 @@ import '../features/radar/finder_fakes.dart';
 // ---------------------------------------------------------------- fakes
 
 class _Bluetooth implements IBluetoothService {
-
   @override
   Future<Map<String, String>> knownDeviceNames() async => const {};
   final records = StreamController<BleScanRecord>.broadcast();
@@ -611,27 +610,24 @@ void main() {
     await shutDown(tester);
   });
 
-  testWidgets(
-    'saving an incident returns to the dashboard',
-    (tester) async {
-      // Regression: a router refresh on every session edit re-created the
-      // pushed form, so its pop after saving never closed it.
-      _phoneScreen(tester);
-      final harness = _Harness(_MemoryStorage());
-      await _launch(tester, harness);
-      await fillSetup(tester, room: '1');
-      await tapVisible(tester, find.text(t('start_session')));
-      await tapVisible(tester, find.text(t('log_incident')).first);
-      await tester.enterText(_field(t('incident_device_name_hint')), 'X');
-      await tapVisible(tester, find.text(t('save_record')));
+  testWidgets('saving an incident returns to the dashboard', (tester) async {
+    // Regression: a router refresh on every session edit re-created the
+    // pushed form, so its pop after saving never closed it.
+    _phoneScreen(tester);
+    final harness = _Harness(_MemoryStorage());
+    await _launch(tester, harness);
+    await fillSetup(tester, room: '1');
+    await tapVisible(tester, find.text(t('start_session')));
+    await tapVisible(tester, find.text(t('log_incident')).first);
+    await tester.enterText(_field(t('incident_device_name_hint')), 'X');
+    await tapVisible(tester, find.text(t('save_record')));
 
-      expect(harness.storage.sessions.single.deviceLogs.single.deviceName, 'X');
-      expect(find.byType(ActionEntryScreen), findsNothing);
-      expect(find.byType(DashboardScreen), findsOneWidget);
-      expect(_location(tester), AppRoute.dashboard);
-      await shutDown(tester);
-    },
-  );
+    expect(harness.storage.sessions.single.deviceLogs.single.deviceName, 'X');
+    expect(find.byType(ActionEntryScreen), findsNothing);
+    expect(find.byType(DashboardScreen), findsOneWidget);
+    expect(_location(tester), AppRoute.dashboard);
+    await shutDown(tester);
+  });
 
   testWidgets('relaunch with a running exam restores the dashboard', (
     tester,

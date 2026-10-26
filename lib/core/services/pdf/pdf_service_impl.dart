@@ -123,6 +123,11 @@ class PdfServiceImpl implements IPdfService {
               _sectionTitle(document.gridTitle!, ui),
             ..._grid(document.grid!, ui),
           ],
+          if (document.overviewCharts.isNotEmpty) ...[
+            if (document.overviewTitle != null)
+              _sectionTitle(document.overviewTitle!, ui),
+            for (final c in document.overviewCharts) _chart(c, ui),
+          ],
           if (document.tableTitle != null)
             _sectionTitle(document.tableTitle!, ui),
           if (document.tableRows.isNotEmpty)
@@ -130,6 +135,11 @@ class PdfServiceImpl implements IPdfService {
           else if (document.emptyTableText != null ||
               document.emptyTableTitle != null)
             _emptyState(document, ui),
+          if (document.charts.isNotEmpty) ...[
+            if (document.chartsTitle != null)
+              _sectionTitle(document.chartsTitle!, ui),
+            for (final c in document.charts) _chart(c, ui),
+          ],
           if (images.isNotEmpty) ...[
             if (document.imagesTitle != null)
               _sectionTitle(document.imagesTitle!, ui),
@@ -251,6 +261,123 @@ class PdfServiceImpl implements IPdfService {
             fontSize: 7.5,
             color: _muted,
           ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _chart(PdfChart c, _Ui ui) {
+    final span = c.end.difference(c.start).inMilliseconds;
+    final yRange = c.maxY - c.minY;
+
+    void paint(PdfGraphics canvas, PdfPoint size) {
+      if (span <= 0 || yRange <= 0) return;
+      double x(DateTime t) =>
+          (t.difference(c.start).inMilliseconds / span).clamp(0.0, 1.0) *
+          size.x;
+      double y(double v) => ((v - c.minY) / yRange).clamp(0.0, 1.0) * size.y;
+
+      // Bands (PDF origin is bottom-left).
+      canvas.setFillColor(_tint(_brand, 0.12));
+      for (final (from, to) in c.bands) {
+        final left = x(from);
+        final width = (x(to) - left).clamp(1.5, size.x);
+        canvas.drawRect(left, 0, width, size.y);
+      }
+      if (c.bands.isNotEmpty) canvas.fillPath();
+
+      // Reference lines.
+      canvas
+        ..setStrokeColor(_line)
+        ..setLineWidth(0.5)
+        ..setLineDashPattern([2, 2]);
+      for (final r in c.refLines) {
+        canvas
+          ..moveTo(0, y(r.value))
+          ..lineTo(size.x, y(r.value));
+      }
+      if (c.refLines.isNotEmpty) canvas.strokePath();
+      canvas
+        ..setLineDashPattern()
+        ..moveTo(0, 0)
+        ..lineTo(size.x, 0)
+        ..strokePath();
+
+      // Series, broken across gaps.
+      for (final s in c.series) {
+        if (s.points.isEmpty) continue;
+        canvas
+          ..setStrokeColor(_pdfColor(s.color))
+          ..setLineWidth(1.2);
+        (DateTime, double)? prev;
+        for (final p in s.points) {
+          final gap = s.breakAfter;
+          final broken =
+              prev == null || (gap != null && p.$1.difference(prev.$1) >= gap);
+          if (broken) {
+            canvas.moveTo(x(p.$1), y(p.$2));
+            // A lone point still shows.
+            canvas.lineTo(x(p.$1) + 0.8, y(p.$2));
+          } else {
+            canvas.lineTo(x(p.$1), y(p.$2));
+          }
+          prev = p;
+        }
+        canvas.strokePath();
+      }
+    }
+
+    pw.Widget swatch(PdfColor color, String label) => pw.Row(
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [
+        pw.Container(width: 8, height: 8, color: color),
+        pw.SizedBox(width: 3),
+        ui.text(label, fontSize: 7.5, color: _muted),
+        pw.SizedBox(width: 10),
+      ],
+    );
+
+    return pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 8),
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: _line, width: 0.6),
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          ui.text(c.title, bold: true, fontSize: 9, color: _ink),
+          if (c.subtitle != null)
+            ui.text(c.subtitle!, fontSize: 8, color: _muted),
+          pw.SizedBox(height: 6),
+          pw.CustomPaint(painter: paint, child: pw.SizedBox(height: 80)),
+          pw.SizedBox(height: 3),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              ui.text(c.startLabel, fontSize: 7.5, color: _muted),
+              ui.text(c.endLabel, fontSize: 7.5, color: _muted),
+            ],
+          ),
+          pw.SizedBox(height: 3),
+          pw.Wrap(
+            children: [
+              for (final s in c.series) swatch(_pdfColor(s.color), s.label),
+              if (c.bandLabel != null)
+                swatch(_tint(_brand, 0.12), c.bandLabel!),
+              if (c.refLines.isNotEmpty)
+                ui.text(
+                  c.refLines.map((r) => r.label).join(' · '),
+                  fontSize: 7.5,
+                  color: _muted,
+                ),
+            ],
+          ),
+          if (c.note != null) ...[
+            pw.SizedBox(height: 2),
+            ui.text(c.note!, fontSize: 7.5, color: _muted),
+          ],
         ],
       ),
     );

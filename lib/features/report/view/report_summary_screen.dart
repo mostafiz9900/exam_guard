@@ -13,6 +13,7 @@ import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/report/view_model/report_view_model.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
+import 'package:exam_guard/features/report/view/widgets/activity_chart_card.dart';
 import 'package:exam_guard/features/report/view/widgets/incident_log_card.dart';
 import 'package:exam_guard/features/report/view/widgets/meta_info.dart';
 import 'package:exam_guard/features/report/view/widgets/metric_card.dart';
@@ -302,6 +303,20 @@ class ReportSummaryScreen extends ConsumerWidget {
                   ),
                   SizedBox(height: AppDimens.spacingLarge),
 
+                  if (session != null && session.activity.length >= 2) ...[
+                    Text(
+                      'report_activity_title'.tr(),
+                      style: Theme.of(context).textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: AppDimens.spacingSmall),
+                    ActivityChartCard(
+                      samples: session.activity,
+                      start: session.startTime,
+                      end: session.endTime ?? session.activity.last.at,
+                    ),
+                    SizedBox(height: AppDimens.spacingLarge),
+                  ],
                   if (session != null && session.hasSeatLayout) ...[
                     Text(
                       'report_seat_map'.tr(),

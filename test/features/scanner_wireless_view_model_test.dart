@@ -15,7 +15,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class _Bluetooth implements IBluetoothService {
-
   /// Names the OS knows (paired / connected), by id.
   Map<String, String> known = const {};
 
@@ -419,36 +418,52 @@ void main() {
       expect(bluetooth.connects, isEmpty);
     });
 
-    test('packets iOS stripped make an Apple device; any content clears it',
-        () async {
-      final now = DateTime.now();
-      BleScanRecord hidden(String id) => BleScanRecord(
-        id: id,
-        name: '',
-        rssi: -45,
-        txPower: null,
-        isConnectable: false,
-        serviceUuids: const [],
-        manufacturerData: const {},
-        timestamp: now,
-        isPayloadHidden: true,
-      );
-      bluetooth.records
-        ..add(hidden('AA:00:00:00:00:21'))
-        ..add(hidden('AA:00:00:00:00:22'))
-        ..add(ble('AA:00:00:00:00:22', -45, name: 'Buds', at: now));
-      await pumpEventQueue();
-      // Updates to a listed device are published at most every 250 ms.
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+    test(
+      'packets iOS stripped make an Apple device; any content clears it',
+      () async {
+        final now = DateTime.now();
+        BleScanRecord hidden(String id) => BleScanRecord(
+          id: id,
+          name: '',
+          rssi: -45,
+          txPower: null,
+          isConnectable: false,
+          serviceUuids: const [],
+          manufacturerData: const {},
+          timestamp: now,
+          isPayloadHidden: true,
+        );
+        bluetooth.records
+          ..add(hidden('AA:00:00:00:00:21'))
+          ..add(hidden('AA:00:00:00:00:22'))
+          ..add(ble('AA:00:00:00:00:22', -45, name: 'Buds', at: now));
+        await pumpEventQueue();
+        // Updates to a listed device are published at most every 250 ms.
+        await Future<void>.delayed(const Duration(milliseconds: 300));
 
-      final apple = device('AA:00:00:00:00:21');
-      expect(apple.deviceType, ScannedDeviceModel.appleHiddenType);
-      expect(apple.manufacturer, 'Apple Inc.');
-      expect(
-        device('AA:00:00:00:00:22').deviceType,
-        isNot(ScannedDeviceModel.appleHiddenType),
-      );
-    });
+        final apple = device('AA:00:00:00:00:21');
+        expect(apple.deviceType, ScannedDeviceModel.appleHiddenType);
+        expect(apple.manufacturer, 'Apple Inc.');
+        expect(
+          device('AA:00:00:00:00:22').deviceType,
+          isNot(ScannedDeviceModel.appleHiddenType),
+        );
+      },
+    );
+
+    test(
+      'a BLE neck loop is flagged high suspicion; a speaker is not',
+      () async {
+        final now = DateTime.now();
+        bluetooth.records
+          ..add(ble('AA:00:00:00:00:31', -60, name: 'Neckloop BT', at: now))
+          ..add(ble('AA:00:00:00:00:32', -60, name: 'JBL Flip 5', at: now));
+        await pumpEventQueue();
+        expect(device('AA:00:00:00:00:31').isHighSuspicion, isTrue);
+        expect(device('AA:00:00:00:00:31').deviceType, contains('Audio'));
+        expect(device('AA:00:00:00:00:32').isHighSuspicion, isFalse);
+      },
+    );
 
     test('paired / connected devices show their saved name', () async {
       bluetooth.known = {'AA:00:00:00:00:09': 'Invigilator Buds'};
@@ -493,6 +508,59 @@ void main() {
       final session = container.read(sessionViewModelProvider)!;
       expect(session.trustedDeviceIds, ids);
       expect(session.hasBaseline, isTrue);
+    });
+
+    test('a baseline remembers fixed equipment only, for the next exam '
+        'in the room', () async {
+      final t = DateTime.now();
+      bluetooth.records
+        ..add(ble('AA:10', -60, name: 'L3250 Series', at: t)) // printer
+        ..add(ble('AA:11', -60, at: t)) // nameless: may rotate
+        ..add(ble('AA:12', -60, name: 'Galaxy S23', at: t)); // phone
+      classicBt.records.add(
+        classic('00:11:22:33:44:66', -60, name: 'Projector'),
+      );
+      wifiScan.scans.add([
+        wifi('School-WiFi', '11:22:33:44:55:66', -60),
+        wifi('AndroidAP_77', '02:22:33:44:55:77', -60), // phone hotspot
+      ]);
+      await pumpEventQueue();
+
+      await vm().takeBaseline();
+
+      final session = container.read(sessionViewModelProvider.notifier);
+      final profile = session.roomProfile()!;
+      expect(profile.ids, {
+        'AA:10',
+        '00:11:22:33:44:66',
+        'wifi:11:22:33:44:55:66',
+      });
+
+      // Next exam in the same room (typed differently) starts with them.
+      await session.endCurrentSession();
+      await session.createSession(
+        instituteName: 'School',
+        teacherName: 'Invigilator',
+        roomNumber: ' 1 2 ',
+      );
+      final next = container.read(sessionViewModelProvider)!;
+      expect(next.trustedDeviceIds, profile.ids);
+      expect(next.profileDeviceIds, profile.ids);
+
+      // Removing one, then forgetting the room.
+      await session.forgetRoomEquipment('AA:10');
+      expect(session.roomProfile()!.ids, hasLength(2));
+      await session.forgetRoomProfile();
+      expect(session.roomProfile(), isNull);
+    });
+
+    test('activity samples are recorded into the exam', () async {
+      bluetooth.records.add(ble('AA:20', -60, at: DateTime.now()));
+      await pumpEventQueue();
+      await vm().recordActivityNow();
+      final a = container.read(sessionViewModelProvider)!.activity.single;
+      expect(a.devices, greaterThanOrEqualTo(1));
+      expect(a.untrusted, a.devices);
     });
 
     test(

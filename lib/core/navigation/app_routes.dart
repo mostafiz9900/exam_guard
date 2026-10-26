@@ -29,6 +29,9 @@ class AppRoute {
   /// Scans a hall QR code; pops with its text.
   static const String hallScan = '/hall/scan';
 
+  /// Hidden camera lens finder (camera + torch glint detection).
+  static const String lensFinder = '/lens-finder';
+
   /// Routes that only make sense while an exam is running.
   static const Set<String> requireActiveSession = {
     dashboard,
@@ -41,5 +44,6 @@ class AppRoute {
     seatSweep,
     hall,
     hallScan,
+    lensFinder,
   };
 }

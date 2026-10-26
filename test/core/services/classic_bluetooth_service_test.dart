@@ -130,26 +130,28 @@ void main() {
     await service.dispose();
   });
 
-  test('a finder pause cancels the inquiry and blocks cycles until resumed',
-      () async {
-    finishImmediately = false;
-    final service = build();
-    await service.start('scanner');
-    await pump();
-    expect(listens, 1);
+  test(
+    'a finder pause cancels the inquiry and blocks cycles until resumed',
+    () async {
+      finishImmediately = false;
+      final service = build();
+      await service.start('scanner');
+      await pump();
+      expect(listens, 1);
 
-    await service.suspend('walk_finder');
-    expect(cancels, 1);
-    final paused = listens;
-    await pump(120);
-    expect(listens, paused);
+      await service.suspend('walk_finder');
+      expect(cancels, 1);
+      final paused = listens;
+      await pump(120);
+      expect(listens, paused);
 
-    await service.resume('walk_finder');
-    await pump();
-    expect(listens, greaterThan(paused));
-    await service.stop('scanner');
-    await service.dispose();
-  });
+      await service.resume('walk_finder');
+      await pump();
+      expect(listens, greaterThan(paused));
+      await service.stop('scanner');
+      await service.dispose();
+    },
+  );
 
   test('does nothing where unsupported', () async {
     final service = build(isAndroid: false);

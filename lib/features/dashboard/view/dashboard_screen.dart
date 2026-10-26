@@ -18,6 +18,7 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/utils/app_date_format.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';
+import 'package:exam_guard/features/session/view/widgets/room_profile_sheet.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/hall_link_tile.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/live_stat_badge.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/dashboard_module_card.dart';
@@ -304,6 +305,7 @@ class DashboardScreen extends HookConsumerWidget {
                         const NewDeviceAlertBanner(),
                         if (!hasBaseline) ...[
                           const RoomBaselineCard(),
+                          const RoomProfileLine(),
                           SizedBox(height: AppDimens.spacingMedium),
                         ],
                         // Live Security Status HUD Hero Card
@@ -478,6 +480,7 @@ class DashboardScreen extends HookConsumerWidget {
                         if (hasBaseline) ...[
                           SizedBox(height: AppDimens.spacingSmall),
                           const RoomBaselineCard(),
+                          const RoomProfileLine(),
                         ],
                         SizedBox(height: AppDimens.spacingSmall),
                         const HallLinkTile(),
