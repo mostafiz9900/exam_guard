@@ -147,6 +147,7 @@ class DirectionFinderSheet extends ConsumerWidget {
                         k.tr(),
                     ],
                     frontLabel: 'dir_front_short'.tr(),
+                    font: textTheme.labelLarge ?? const TextStyle(),
                   ),
                 ),
               ),
@@ -513,6 +514,7 @@ class CompassRosePainter extends CustomPainter {
     required this.accent,
     required this.letters,
     required this.frontLabel,
+    required this.font,
   });
 
   final double? heading;
@@ -527,6 +529,9 @@ class CompassRosePainter extends CustomPainter {
   /// N, E, S, W in the current language.
   final List<String> letters;
   final String frontLabel;
+
+  /// Theme text style (font family) for the letters drawn on the canvas.
+  final TextStyle font;
 
   static double _rad(double deg) => deg * math.pi / 180;
 
@@ -563,7 +568,7 @@ class CompassRosePainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: letters[i],
-          style: TextStyle(
+          style: font.copyWith(
             color: i == 0 ? Colors.red.shade400 : text,
             fontWeight: FontWeight.bold,
             fontSize: r * 0.11,
@@ -611,7 +616,7 @@ class CompassRosePainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: frontLabel,
-          style: TextStyle(
+          style: font.copyWith(
             color: accent,
             fontWeight: FontWeight.w800,
             fontSize: r * 0.08,

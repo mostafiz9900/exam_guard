@@ -233,3 +233,8 @@
 - **What Happens**: The supplied icon (AI art) has the grey/white transparency checkerboard baked into its pixels, so Asset Studio output showed squares in the corners. Copying its `res/` output also deleted `values/styles.xml`, which holds LaunchTheme/NormalTheme (the build breaks without it).
 - **How to Avoid**: Re-cut the circular emblem (radius 230 px on the 512 source) and regenerate. A script that rebuilds every Android/iOS/store/splash size is described in .claude/modules/onboarding.md. Splash navy `#0B1628` = `BrandColors.navy` = `@color/splash_background`. Android 12+ uses `values-v31/styles.xml`.
 - **Discovered**: 2026-11-01
+
+#### radar — Bluetooth gives no direction; only the body-shadow turn does
+- **What Happens**: Writing N/S/E/W on the radar without data would mislead. Picking the strongest 10° bin wobbles ±20° because the top of the shadow curve is flat.
+- **How to Avoid**: Direction comes only from DirectionFinder (a full turn while holding the phone at the chest), using a first-harmonic fit. Show "unclear" rather than guess. CustomPainter text must use a theme TextStyle (font family), or tests render boxes.
+- **Discovered**: 2026-11-01
