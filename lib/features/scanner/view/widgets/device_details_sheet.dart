@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:exam_guard/core/widgets/app_bottom_sheet.dart';
 import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
@@ -21,9 +22,8 @@ Future<void> showDeviceDetailsSheet(
   VoidCallback? onSeatSweep,
   DeviceHistory? history,
 }) {
-  return showModalBottomSheet<void>(
+  return showAppBottomSheet<void>(
     context: context,
-    isScrollControlled: true,
     showDragHandle: true,
     builder: (context) => _DeviceDetailsSheet(
       device: device,
@@ -107,6 +107,12 @@ class _DeviceDetailsSheet extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  key: const Key('device_details_close'),
+                  tooltip: 'close'.tr(),
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
                 ),
               ],
             ),

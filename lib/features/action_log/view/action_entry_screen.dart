@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/widgets/app_bottom_sheet.dart';
 import 'package:exam_guard/core/widgets/app_text_context_menu.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
@@ -62,7 +63,7 @@ class ActionEntryScreen extends HookConsumerWidget {
     );
     final selectedType = useState(initialCategory);
     final selectedSeverity = useState(LogSeverity.high);
-    final seat = useState<String?>(null);
+    final seat = useState<String?>(args.seat);
     final viewModel = ref.read(actionEntryViewModelProvider.notifier);
     final entryState = ref.watch(actionEntryViewModelProvider);
     final isSaving = entryState.isSaving;
@@ -95,9 +96,8 @@ class ActionEntryScreen extends HookConsumerWidget {
       // The screen's messenger outlives the sheet and this screen.
       final messenger = ScaffoldMessenger.of(context);
 
-      final result = await showModalBottomSheet<(_SheetAction, Rect?)>(
+      final result = await showAppBottomSheet<(_SheetAction, Rect?)>(
         context: context,
-        isScrollControlled: true,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(
             top: Radius.circular(AppDimens.radiusLarge),

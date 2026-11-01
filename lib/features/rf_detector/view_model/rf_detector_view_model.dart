@@ -342,7 +342,7 @@ class RfDetectorViewModel extends Notifier<RfDetectorState> {
 
   void _onPacket(RfPacket p) {
     _recent.add(p);
-    if (p.isExamGuardNode) _hardwareNodes[p.sourceName] = p.timestamp;
+    if (p.isPaharaNode) _hardwareNodes[p.sourceName] = p.timestamp;
   }
 
   void _tick() {

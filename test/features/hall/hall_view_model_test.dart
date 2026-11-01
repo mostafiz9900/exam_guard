@@ -224,7 +224,7 @@ void main() {
       HallProtocol.encodeHello(
         const HallMember(
           id: 'N-1',
-          name: 'ExamGuard-Node-01',
+          name: 'Pahara-Node-01',
           kind: HallMemberKind.node,
         ),
         host.state.nodeKey,
@@ -237,7 +237,7 @@ void main() {
     final d = host.state.remoteDevices.single;
     // The hub says who sent it, not the message.
     expect(d.sourceId, 'N-1');
-    expect(d.sourceName, 'ExamGuard-Node-01');
+    expect(d.sourceName, 'Pahara-Node-01');
   });
 
   test('firmware-shaped node sightings arrive classified', () async {
@@ -249,7 +249,7 @@ void main() {
       't': 'hello',
       'v': 1,
       'token': host.state.nodeKey,
-      'member': {'id': 'N-A1B2C3', 'name': 'ExamGuard-Node-01', 'kind': 'node'},
+      'member': {'id': 'N-A1B2C3', 'name': 'Pahara-Node-01', 'kind': 'node'},
     });
     await _until(() => host.state.nodeCount == 1);
     node.send({
@@ -282,7 +282,7 @@ void main() {
       byId['wifi:AA:00:00:00:00:02']!.device.deviceType,
       contains('Hotspot'),
     );
-    expect(byId.values.first.sourceName, 'ExamGuard-Node-01');
+    expect(byId.values.first.sourceName, 'Pahara-Node-01');
   });
 
   Future<LocalLinkClientImpl> joinNode(String id, String name) async {
@@ -309,19 +309,16 @@ void main() {
     'a node that goes away is flagged on every phone, cleared on return',
     () async {
       await hostAndJoin();
-      final node = await joinNode('N-7', 'ExamGuard-Node-Back');
+      final node = await joinNode('N-7', 'Pahara-Node-Back');
       await _until(() => member.state.nodeCount == 1);
       expect(host.state.offlineNodes, isEmpty);
 
       await node.disconnect();
       await _until(() => host.state.offlineNodes.isNotEmpty);
       await _until(() => member.state.offlineNodes.isNotEmpty);
-      expect(
-        member.state.offlineNodes.single.member.name,
-        'ExamGuard-Node-Back',
-      );
+      expect(member.state.offlineNodes.single.member.name, 'Pahara-Node-Back');
 
-      await joinNode('N-7', 'ExamGuard-Node-Back');
+      await joinNode('N-7', 'Pahara-Node-Back');
       await _until(() => host.state.offlineNodes.isEmpty);
       await _until(() => member.state.offlineNodes.isEmpty);
     },
@@ -341,7 +338,7 @@ void main() {
     'after the baseline, a new device near a node alerts every phone',
     () async {
       await hostAndJoin();
-      final node = await joinNode('N-9', 'ExamGuard-Node-Front');
+      final node = await joinNode('N-9', 'Pahara-Node-Front');
       await _until(() => host.state.nodeCount == 1);
       // Room baseline on the host.
       host.scanner.emit(
@@ -359,7 +356,7 @@ void main() {
       await _until(() => host.state.pendingAlerts.isNotEmpty);
       await _until(() => member.state.pendingAlerts.isNotEmpty);
       final a = member.state.pendingAlerts.single;
-      expect(a.sourceName, 'ExamGuard-Node-Front');
+      expect(a.sourceName, 'Pahara-Node-Front');
       expect(a.alert.deviceType, contains('Audio'));
     },
   );

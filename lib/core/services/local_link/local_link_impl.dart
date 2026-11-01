@@ -67,7 +67,7 @@ class LocalLinkHubImpl implements ILocalLinkHub {
       // Plain GET: lets a node or a browser check the hub is reachable.
       request.response
         ..statusCode = HttpStatus.ok
-        ..write('ExamGuard hall hub')
+        ..write('Pahara hall hub')
         ..close();
       return;
     }

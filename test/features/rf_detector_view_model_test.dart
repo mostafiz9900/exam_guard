@@ -170,11 +170,11 @@ void main() {
     expect(container.read(rfDetectorViewModelProvider).isMeasuring, isTrue);
   });
 
-  test('only "ExamGuard…" names are hardware nodes, never generic ESP32', () {
-    expect(RfRepository.isExamGuardNodeName('ExamGuard-Node-1'), isTrue);
-    expect(RfRepository.isExamGuardNodeName('examguard'), isTrue);
-    expect(RfRepository.isExamGuardNodeName('ESP32-DevKit'), isFalse);
-    expect(RfRepository.isExamGuardNodeName('esp32'), isFalse);
-    expect(RfRepository.isExamGuardNodeName('rf-node'), isFalse);
+  test('only "Pahara…" names are hardware nodes, never generic ESP32', () {
+    expect(RfRepository.isPaharaNodeName('Pahara-Node-1'), isTrue);
+    expect(RfRepository.isPaharaNodeName('examguard'), isTrue);
+    expect(RfRepository.isPaharaNodeName('ESP32-DevKit'), isFalse);
+    expect(RfRepository.isPaharaNodeName('esp32'), isFalse);
+    expect(RfRepository.isPaharaNodeName('rf-node'), isFalse);
   });
 }

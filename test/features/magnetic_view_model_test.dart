@@ -18,6 +18,11 @@ class FakeMagnetometer implements IMagnetometerService {
 }
 
 void main() {
+  // These tests feed one reading at a time: the first sets the baseline.
+  // The median-of-5 settle is covered in magnetic_baseline_test.dart.
+  setUpAll(() => MagneticViewModel.settleSamples = 1);
+  tearDownAll(() => MagneticViewModel.settleSamples = 5);
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('calculateHazard', () {

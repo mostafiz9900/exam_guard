@@ -86,7 +86,7 @@ class PdfServiceImpl implements IPdfService {
     _PdfFonts fonts,
     List<_LoadedImage> images,
   ) {
-    final doc = pw.Document(title: document.title, creator: 'ExamGuard');
+    final doc = pw.Document(title: document.title, creator: 'Pahara');
     final ui = _Ui(fonts, _text);
 
     doc.addPage(

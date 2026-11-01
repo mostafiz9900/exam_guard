@@ -6,18 +6,20 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleDisplayName</key>
-	<string>Exam Guard</string>
+	<string>Pahara</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>ExamGuard requires Bluetooth access to scan for unauthorized wireless cheat devices in exam halls.</string>
+	<string>Pahara uses Bluetooth to find hidden wireless devices in the exam hall and to set up Pahara sensor nodes.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>ExamGuard requires Bluetooth access to scan for unauthorized wireless cheat devices in exam halls.</string>
+	<string>Pahara uses Bluetooth to find hidden wireless devices in the exam hall and to set up Pahara sensor nodes.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>ExamGuard uses the camera to photograph evidence when logging an exam violation.</string>
+	<string>Pahara uses the camera to photograph incident evidence, find hidden camera lenses and scan hall QR codes.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ExamGuard links invigilator phones and sensor nodes in the same exam hall over the local Wi-Fi or hotspot.</string>
+	<string>Pahara links invigilator phones and sensor nodes in the same exam hall over the local Wi-Fi or hotspot.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>ExamGuard requires Location access to discover nearby BLE devices.</string>
+	<string>Pahara needs this to scan for nearby Bluetooth devices. Your location is never read or stored.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,7 +27,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>exam_guard</string>
+	<string>Pahara</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

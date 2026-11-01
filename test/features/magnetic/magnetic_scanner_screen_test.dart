@@ -7,6 +7,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
@@ -18,10 +19,10 @@ import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';
 import 'package:exam_guard/features/magnetic/view/magnetic_scanner_screen.dart';
 import 'package:exam_guard/features/magnetic/view/widgets/guide_step_item.dart';
-import 'package:exam_guard/features/magnetic/view/widgets/magnetic_gauge_painter.dart';
-import 'package:exam_guard/features/magnetic/view/widgets/stat_item.dart';
+import 'package:exam_guard/features/magnetic/view/widgets/magnetic_dial.dart';
 import 'package:exam_guard/features/magnetic/view_model/magnetic_view_model.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -31,7 +32,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _green = Color(0xFF10B981);
 const _amber = Color(0xFFF59E0B);
 const _red = Color(0xFFEF4444);
-const _alertRed = Color(0xFFDC2626);
+const _alertRed = Color(0xFFB91C1C); // MagColors.strong
 
 class _FakeMagnetometer implements IMagnetometerService {
   _FakeMagnetometer() {
@@ -147,14 +148,17 @@ Future<_Harness> _pump(
         ],
         child: Builder(
           builder: (context) => AppScreenSize(
-            builder: (_) => MaterialApp.router(
-              theme: AppTheme.lightTheme,
-              darkTheme: AppTheme.darkTheme,
-              themeMode: mode,
-              localizationsDelegates: context.localizationDelegates,
-              supportedLocales: context.supportedLocales,
-              locale: context.locale,
-              routerConfig: router,
+            builder: (_) => RepaintBoundary(
+              key: _shotKey,
+              child: MaterialApp.router(
+                theme: AppTheme.lightTheme,
+                darkTheme: AppTheme.darkTheme,
+                themeMode: mode,
+                localizationsDelegates: context.localizationDelegates,
+                supportedLocales: context.supportedLocales,
+                locale: context.locale,
+                routerConfig: router,
+              ),
             ),
           ),
         ),
@@ -194,16 +198,22 @@ Future<void> _emit(WidgetTester tester, _Harness h, double magnitude) async {
 Color? _textColor(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
 
-MagneticGaugePainter _gauge(WidgetTester tester) => tester
+MagneticDialPainter _gauge(WidgetTester tester) => tester
     .widgetList<CustomPaint>(find.byType(CustomPaint))
     .map((c) => c.painter)
-    .whereType<MagneticGaugePainter>()
+    .whereType<MagneticDialPainter>()
     .single;
 
-String _statValue(WidgetTester tester, String label) => tester
-    .widgetList<StatItem>(find.byType(StatItem))
-    .firstWhere((s) => s.label == label)
-    .value;
+/// The value shown above a stat's [label] (e.g. "Biggest change").
+String _statValue(WidgetTester tester, String label) {
+  final stat = find
+      .ancestor(of: find.text(label), matching: find.byType(Column))
+      .first;
+  return tester
+      .widgetList<Text>(find.descendant(of: stat, matching: find.byType(Text)))
+      .first
+      .data!;
+}
 
 Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder);
@@ -230,17 +240,57 @@ Future<void> _loadFonts() async {
   )..addFont(bytes('MaterialIcons-Regular.otf'))).load();
 }
 
+final _shotDir = Platform.environment['MAG_SHOTS'];
+final _shotKey = GlobalKey();
+
+/// With `MAG_SHOTS=dir`, saves the screen as `dir/name.png`.
+Future<void> _shot(WidgetTester tester, String name) async {
+  final dir = _shotDir;
+  if (dir == null) return;
+  await tester.runAsync(() async {
+    final boundary =
+        _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 2);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    File('$dir/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+  });
+}
+
 Future<void> _unmount(WidgetTester tester) async {
   await tester.pumpWidget(const SizedBox());
   await tester.pump(const Duration(seconds: 1));
 }
 
 void main() {
+  // These tests feed one reading at a time: the first sets the baseline.
+  // The median-of-5 settle is covered in magnetic_baseline_test.dart.
+  setUpAll(() => MagneticViewModel.settleSamples = 1);
+  tearDownAll(() => MagneticViewModel.settleSamples = 5);
+
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     await EasyLocalization.ensureInitialized();
     await _loadFonts();
+  });
+
+  testWidgets('visual tour (MAG_SHOTS)', (tester) async {
+    if (_shotDir == null) return;
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      final h = await _pump(tester, mode: mode);
+      await _shot(tester, 'mag_${mode.name}_waiting');
+      await _emit(tester, h, 45);
+      await _shot(tester, 'mag_${mode.name}_normal');
+      await _emit(tester, h, 90);
+      await _shot(tester, 'mag_${mode.name}_critical');
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -700));
+      await tester.pump();
+      await _shot(tester, 'mag_${mode.name}_critical_mid');
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -2000));
+      await tester.pump();
+      await _shot(tester, 'mag_${mode.name}_critical_end');
+      await _unmount(tester);
+    }
   });
 
   group('MagneticHazardLevel / MagneticSensitivity', () {
@@ -275,15 +325,15 @@ void main() {
       );
     });
 
-    test('gauge painter repaints only on change', () {
-      MagneticGaugePainter p(double m) => MagneticGaugePainter(
-        magnitude: m,
-        angle: 0,
+    test('dial painter repaints only on change', () {
+      MagneticDialPainter p(double f) => MagneticDialPainter(
+        fraction: f,
         color: _green,
-        trackColor: Colors.grey,
+        isLive: true,
+        track: Colors.grey,
       );
-      expect(p(10).shouldRepaint(p(10)), isFalse);
-      expect(p(10).shouldRepaint(p(20)), isTrue);
+      expect(p(0.1).shouldRepaint(p(0.1)), isFalse);
+      expect(p(0.1).shouldRepaint(p(0.2)), isTrue);
     });
   });
 
@@ -299,7 +349,7 @@ void main() {
       await _emit(tester, h, 45);
       await _emit(tester, h, 300);
       expect(
-        find.text('VERY STRONG SOURCE — DEVICE AT CONTACT RANGE'),
+        find.text('Very strong magnet — at touching distance'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
@@ -318,13 +368,13 @@ void main() {
 
   testWidgets('waiting for the first reading is not "normal"', (tester) async {
     await _pump(tester);
-    expect(find.text('WAITING FOR SENSOR…'), findsWidgets);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsNothing);
+    expect(find.text('STARTING SENSOR…'), findsWidgets);
+    expect(find.text('Nothing magnetic close'), findsNothing);
     // Calibration needs a live reading.
-    final calibrate = tester.widget<OutlinedButton>(
+    final calibrate = tester.widget<FilledButton>(
       find.ancestor(
-        of: find.text('Calibrate baseline'),
-        matching: find.byWidgetPredicate((w) => w is OutlinedButton),
+        of: find.text('Set zero here'),
+        matching: find.byWidgetPredicate((w) => w is FilledButton),
       ),
     );
     expect(calibrate.onPressed, isNull);
@@ -340,18 +390,18 @@ void main() {
     await tester.pump();
 
     expect(_state(tester).isSensorUnavailable, isTrue);
-    expect(find.text('SENSOR UNAVAILABLE'), findsOneWidget);
+    expect(find.text('NOT AVAILABLE'), findsOneWidget);
     expect(find.text('No magnetometer on this phone'), findsOneWidget);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsNothing);
-    expect(find.byType(MagneticGaugePainter), findsNothing);
+    expect(find.text('Nothing magnetic close'), findsNothing);
+    expect(find.byType(MagneticDial), findsNothing);
     expect(find.text('Log incident'), findsNothing);
     expect(tester.takeException(), isNull);
 
     // Still listening: a slow sensor comes live by itself.
     expect(h.sensor.hasListener, isTrue);
     await _emit(tester, h, 45);
-    expect(find.text('MAGNETOMETER LIVE'), findsOneWidget);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsOneWidget);
+    expect(find.text('LIVE — measuring'), findsOneWidget);
+    expect(find.text('Nothing magnetic close'), findsOneWidget);
     await _unmount(tester);
   });
 
@@ -361,7 +411,7 @@ void main() {
     await _pump(tester);
     await tester.pump(const Duration(milliseconds: 2100));
     await tester.pump();
-    await tester.tap(find.text('Open scanner'));
+    await tester.tap(find.text('Wireless scanner'));
     await tester.pumpAndSettle();
     expect(find.text('SCANNER_STUB'), findsOneWidget);
     await _unmount(tester);
@@ -375,7 +425,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(_state(tester).isSensorUnavailable, isTrue);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsNothing);
+    expect(find.text('Nothing magnetic close'), findsNothing);
     // The subscription was cancelled on error; the user needs a way back.
     expect(find.text('Retry'), findsOneWidget);
     await tester.tap(find.text('Retry'));
@@ -390,13 +440,13 @@ void main() {
   ) async {
     final h = await _pump(tester);
     await _emit(tester, h, 45);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsOneWidget);
+    expect(find.text('Nothing magnetic close'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Pause sensor'));
     await tester.pump();
     expect(find.text('NOT MEASURING — sensor paused'), findsOneWidget);
-    expect(find.text('SENSOR PAUSED'), findsOneWidget);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsNothing);
+    expect(find.text('PAUSED'), findsOneWidget);
+    expect(find.text('Nothing magnetic close'), findsNothing);
     expect(_gauge(tester).color, isNot(_green));
     expect(h.sensor.hasListener, isFalse);
     expect(tester.takeException(), isNull);
@@ -405,9 +455,9 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(h.sensor.hasListener, isTrue);
-    expect(find.text('WAITING FOR SENSOR…'), findsWidgets);
+    expect(find.text('STARTING SENSOR…'), findsWidgets);
     await _emit(tester, h, 46);
-    expect(find.text('MAGNETOMETER LIVE'), findsOneWidget);
+    expect(find.text('LIVE — measuring'), findsOneWidget);
     await _unmount(tester);
   });
 
@@ -419,43 +469,43 @@ void main() {
     // First reading is the automatic baseline.
     await _emit(tester, h, 45);
     expect(_state(tester).baseline, 45);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsOneWidget);
-    expect(_textColor(tester, 'NORMAL AMBIENT FIELD'), _green);
-    expect(find.text('45.0'), findsOneWidget);
-    expect(_statValue(tester, 'Baseline (auto)'), '45.0 μT');
+    expect(find.text('Nothing magnetic close'), findsOneWidget);
+    expect(_textColor(tester, 'Nothing magnetic close'), _green);
+    expect(find.text('Total field 45.0 μT'), findsOneWidget);
+    expect(_statValue(tester, 'Normal (auto)'), '45 μT');
     expect(_gauge(tester).color, _green);
 
     // Δ 19 ≤ T: still normal (change from baseline only).
     await _emit(tester, h, 64);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsOneWidget);
+    expect(find.text('Nothing magnetic close'), findsOneWidget);
 
     // Δ 25 > T.
     await _emit(tester, h, 70);
-    expect(find.text('METAL / ANOMALY DETECTED'), findsOneWidget);
-    expect(_textColor(tester, 'METAL / ANOMALY DETECTED'), _amber);
-    expect(find.text('70.0'), findsOneWidget);
+    expect(find.text('Something magnetic nearby'), findsOneWidget);
+    expect(_textColor(tester, 'Something magnetic nearby'), _amber);
+    expect(find.text('Total field 70.0 μT'), findsOneWidget);
     expect(_gauge(tester).color, _amber);
-    expect(_gauge(tester).magnitude, 70);
+    expect(_gauge(tester).fraction, greaterThan(0));
 
     // Δ 45 > 2T.
     await _emit(tester, h, 90);
-    expect(find.text('STRONG MAGNETIC ANOMALY'), findsOneWidget);
-    expect(_textColor(tester, 'STRONG MAGNETIC ANOMALY'), _red);
+    expect(find.text('A magnet is very close'), findsOneWidget);
+    expect(_textColor(tester, 'A magnet is very close'), _red);
     expect(_gauge(tester).color, _red);
 
     // Δ 85 > 4T.
     await _emit(tester, h, 130);
-    const strong = 'VERY STRONG SOURCE — DEVICE AT CONTACT RANGE';
+    const strong = 'Very strong magnet — at touching distance';
     expect(find.text(strong), findsOneWidget);
     expect(_textColor(tester, strong), _alertRed);
     expect(_gauge(tester).color, _alertRed);
-    expect(_statValue(tester, 'Peak hold'), '130.0 μT');
+    expect(_statValue(tester, 'Biggest change'), '85 μT');
 
     // A drop below baseline counts too: Δ 25.
     await _emit(tester, h, 20);
-    expect(find.text('METAL / ANOMALY DETECTED'), findsOneWidget);
+    expect(find.text('Something magnetic nearby'), findsOneWidget);
     // Peak hold keeps the maximum.
-    expect(_statValue(tester, 'Peak hold'), '130.0 μT');
+    expect(_statValue(tester, 'Biggest change'), '85 μT');
 
     // The buzzer beeps faster as the level rises, only while live.
     expect(h.buzzer.distances, containsAllInOrder([4.0, 2.0, 0.5, 4.0]));
@@ -470,32 +520,24 @@ void main() {
     await _emit(tester, h, 45);
     await _emit(tester, h, 70); // Δ 25
 
-    expect(find.text('Medium sensitivity (±20 μT)'), findsOneWidget);
-    expect(find.text('METAL / ANOMALY DETECTED'), findsOneWidget);
+    Set<MagneticSensitivity> selected() => tester
+        .widget<SegmentedButton<MagneticSensitivity>>(
+          find.byType(SegmentedButton<MagneticSensitivity>),
+        )
+        .selected;
+    expect(selected(), {MagneticSensitivity.medium});
+    expect(find.textContaining('more than 20 μT'), findsOneWidget);
+    expect(find.text('Something magnetic nearby'), findsOneWidget);
 
-    await _tapVisible(tester, find.text('Low sensitivity (±35 μT)'));
+    await _tapVisible(tester, find.text('Low'));
     expect(_state(tester).sensitivity, MagneticSensitivity.low);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsOneWidget);
-    expect(
-      tester
-          .widget<ChoiceChip>(
-            find.widgetWithText(ChoiceChip, 'Low sensitivity (±35 μT)'),
-          )
-          .selected,
-      isTrue,
-    );
+    expect(find.text('Nothing magnetic close'), findsOneWidget);
+    expect(selected(), {MagneticSensitivity.low});
 
-    await _tapVisible(tester, find.text('High sensitivity (±10 μT)'));
+    await _tapVisible(tester, find.text('High'));
     expect(_state(tester).sensitivity, MagneticSensitivity.high);
-    expect(find.text('STRONG MAGNETIC ANOMALY'), findsOneWidget);
-    expect(
-      tester
-          .widget<ChoiceChip>(
-            find.widgetWithText(ChoiceChip, 'Low sensitivity (±35 μT)'),
-          )
-          .selected,
-      isFalse,
-    );
+    expect(find.text('A magnet is very close'), findsOneWidget);
+    expect(find.textContaining('more than 10 μT'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await _unmount(tester);
   });
@@ -504,13 +546,10 @@ void main() {
     final h = await _pump(tester);
     await _emit(tester, h, 45);
     await _emit(tester, h, 70);
-    expect(find.text('METAL / ANOMALY DETECTED'), findsOneWidget);
-    expect(
-      find.textContaining('Baseline is the first reading'),
-      findsOneWidget,
-    );
+    expect(find.text('Something magnetic nearby'), findsOneWidget);
+    expect(find.textContaining('Normal is set automatically'), findsOneWidget);
 
-    await _tapVisible(tester, find.text('Calibrate baseline'));
+    await _tapVisible(tester, find.text('Set zero here'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Baseline set to 70.0 μT'), findsOneWidget);
     final s = _state(tester);
@@ -518,23 +557,21 @@ void main() {
     expect(s.isBaselineCalibrated, isTrue);
     expect(s.peakValue, 70);
     expect(s.peakHazard, MagneticHazardLevel.normal);
-    expect(find.text('NORMAL AMBIENT FIELD'), findsOneWidget);
-    expect(_statValue(tester, 'Baseline'), '70.0 μT');
-    expect(find.textContaining('Baseline is the first reading'), findsNothing);
+    expect(find.text('Nothing magnetic close'), findsOneWidget);
+    expect(_statValue(tester, 'Normal (set)'), '70 μT');
+    expect(find.textContaining('Normal is set automatically'), findsNothing);
 
     // Later readings are measured against the new baseline.
     await _emit(tester, h, 95); // Δ 25
-    expect(find.text('METAL / ANOMALY DETECTED'), findsOneWidget);
+    expect(find.text('Something magnetic nearby'), findsOneWidget);
     await _emit(tester, h, 45); // Δ 25 below
-    expect(find.text('METAL / ANOMALY DETECTED'), findsOneWidget);
+    expect(find.text('Something magnetic nearby'), findsOneWidget);
     await _unmount(tester);
   });
 
-  testWidgets('guide opens from the chip and the app bar and closes', (
-    tester,
-  ) async {
+  testWidgets('guide opens from the app bar and closes', (tester) async {
     await _pump(tester);
-    await tester.tap(find.widgetWithText(InkWell, 'How to use'));
+    await tester.tap(find.byTooltip('How to use'));
     await tester.pumpAndSettle();
     expect(find.text('Magnetic scanner guide'), findsOneWidget);
     expect(find.byType(GuideStepItem), findsWidgets);
@@ -573,7 +610,7 @@ void main() {
     await tester.tap(find.byTooltip('Audio alert on/off'));
     await tester.pump();
     expect(_state(tester).isBuzzerEnabled, isFalse);
-    expect(find.byIcon(Icons.notifications_off_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.volume_off_rounded), findsOneWidget);
     final count = h.buzzer.distances.length;
     final stops = h.buzzer.stops;
     await _emit(tester, h, 130);

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Centralized color palette for ExamGuard.
+/// Centralized color palette for Pahara.
 ///
 /// All theme colors are defined here to avoid magic colors across the app.
 class AppColors {

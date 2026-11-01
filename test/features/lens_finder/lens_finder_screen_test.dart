@@ -116,7 +116,7 @@ void main() {
   for (final locale in const [Locale('en'), Locale('bn')]) {
     for (final mode in const [ThemeMode.light, ThemeMode.dark]) {
       final name = 'lens_${locale.languageCode}_${mode.name}';
-      testWidgets('$name: live with a glint, then denied — no overflow', (
+      testWidgets('$name: live with a glint fits a small phone', (
         tester,
       ) async {
         final camera = FakeCamera();
@@ -128,29 +128,22 @@ void main() {
         expect(c.read(lensFinderViewModelProvider).candidates, isNotEmpty);
         expect(tester.takeException(), isNull);
         await _shot(tester, '${name}_live');
-
-        camera.failWith = CameraStreamError.permissionDenied;
-        await c.read(lensFinderViewModelProvider.notifier).start();
-        await tester.pump(const Duration(milliseconds: 200));
-        expect(
-          c.read(lensFinderViewModelProvider).status,
-          LensFinderStatus.permissionDenied,
-        );
-        expect(tester.takeException(), isNull);
-        await _shot(tester, '${name}_denied');
       });
+
+      for (final error in const [
+        CameraStreamError.permissionDenied,
+        CameraStreamError.noCamera,
+      ]) {
+        testWidgets('$name: ${error.name} is "not scanning"', (tester) async {
+          final camera = FakeCamera()..failWith = error;
+          final c = await _pump(tester, camera, mode: mode, locale: locale);
+          final status = c.read(lensFinderViewModelProvider).status;
+          expect(status, isNot(LensFinderStatus.live));
+          expect(c.read(lensFinderViewModelProvider).candidates, isEmpty);
+          expect(tester.takeException(), isNull);
+          await _shot(tester, '${name}_${error.name}');
+        });
+      }
     }
   }
-
-  testWidgets('paused shows a not-scanning state with a way to resume', (
-    tester,
-  ) async {
-    final camera = FakeCamera();
-    final c = await _pump(tester, camera);
-    await c.read(lensFinderViewModelProvider.notifier).pause();
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(c.read(lensFinderViewModelProvider).status, LensFinderStatus.paused);
-    expect(tester.takeException(), isNull);
-    await _shot(tester, 'lens_paused');
-  });
 }

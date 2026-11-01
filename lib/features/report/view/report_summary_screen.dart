@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/widgets/app_bottom_sheet.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/widgets/app_settings_menu.dart';
@@ -44,9 +45,8 @@ class ReportSummaryScreen extends ConsumerWidget {
     final incidents = ref
         .read(reportViewModelProvider.notifier)
         .incidentsAtSeat(session, seat);
-    return showModalBottomSheet<void>(
+    return showAppBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: ConstrainedBox(

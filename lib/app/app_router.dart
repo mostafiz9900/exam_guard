@@ -8,9 +8,14 @@ import 'package:exam_guard/features/action_log/view/action_entry_screen.dart';
 import 'package:exam_guard/features/dashboard/view/dashboard_screen.dart';
 import 'package:exam_guard/features/hall/view/hall_scan_screen.dart';
 import 'package:exam_guard/features/hall/view/hall_screen.dart';
+import 'package:exam_guard/features/hall_map/view/hall_map_screen.dart';
 import 'package:exam_guard/features/history/view/history_screen.dart';
 import 'package:exam_guard/features/lens_finder/view/lens_finder_screen.dart';
 import 'package:exam_guard/features/magnetic/view/magnetic_scanner_screen.dart';
+import 'package:exam_guard/features/node_setup/view/node_setup_screen.dart';
+import 'package:exam_guard/features/onboarding/view/onboarding_screen.dart';
+import 'package:exam_guard/features/onboarding/view/splash_screen.dart';
+import 'package:exam_guard/features/node_setup/view/sensor_nodes_screen.dart';
 import 'package:exam_guard/features/radar/view/seat_sweep_screen.dart';
 import 'package:exam_guard/features/radar/view/tracking_radar_screen.dart';
 import 'package:exam_guard/features/radar/view/walk_finder_screen.dart';
@@ -37,7 +42,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   ref.onDispose(sessionChanges.dispose);
 
   final router = GoRouter(
-    initialLocation: AppRoute.sessionSetup,
+    initialLocation: AppRoute.splash,
     refreshListenable: sessionChanges,
     redirect: (context, state) => appRedirect(
       session: ref.read(sessionViewModelProvider),
@@ -45,6 +50,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ),
     errorBuilder: (context, state) => const _UnknownRoute(),
     routes: [
+      GoRoute(
+        path: AppRoute.splash,
+        builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.onboarding,
+        builder: (context, state) => OnboardingScreen(
+          replay: state.uri.queryParameters['replay'] == '1',
+        ),
+      ),
       GoRoute(
         path: AppRoute.sessionSetup,
         builder: (context, state) => const SessionSetupScreen(),
@@ -122,6 +137,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoute.lensFinder,
         builder: (context, state) => const LensFinderScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.nodes,
+        builder: (context, state) => const SensorNodesScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.hallMap,
+        builder: (context, state) => const HallMapScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.nodeAdd,
+        builder: (context, state) => const NodeSetupScreen(),
       ),
     ],
   );

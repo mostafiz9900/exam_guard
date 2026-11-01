@@ -31,7 +31,7 @@ void main() {
     );
     expect(
       ReportRepository.reportFileName(session),
-      'examguard_room_12_B_2026-10-13.pdf',
+      'pahara_room_12_B_2026-10-13.pdf',
     );
   });
 }

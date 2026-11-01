@@ -11,7 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:exam_guard/app/exam_guard_app.dart';
+import 'package:exam_guard/app/pahara_app.dart';
 
 void main() {
   setUpAll(() async {
@@ -20,7 +20,7 @@ void main() {
     await EasyLocalization.ensureInitialized();
   });
 
-  testWidgets('ExamGuard app builds with localization', (
+  testWidgets('Pahara app builds with localization', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -28,13 +28,13 @@ void main() {
         supportedLocales: const [Locale('en')],
         path: 'assets/translations',
         fallbackLocale: const Locale('en'),
-        child: const ProviderScope(child: ExamGuardApp()),
+        child: const ProviderScope(child: PaharaApp()),
       ),
     );
 
     await tester.pumpAndSettle();
 
-    expect(find.byType(ExamGuardApp), findsOneWidget);
+    expect(find.byType(PaharaApp), findsOneWidget);
     expect(find.byType(MaterialApp), findsOneWidget);
   });
 }

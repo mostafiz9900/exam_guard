@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'package:exam_guard/core/localization/app_localization.dart';
+import 'package:exam_guard/core/navigation/app_navigator.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 
 import 'package:exam_guard/core/settings/theme_mode_view_model.dart';
 
@@ -32,6 +34,8 @@ class AppSettingsMenu extends ConsumerWidget {
             context.setAppLocale(AppLocalization.bangla);
           case _MenuAction.arabic:
             context.setAppLocale(AppLocalization.arabic);
+          case _MenuAction.guide:
+            context.pushTo('${AppRoute.onboarding}?replay=1');
         }
       },
       itemBuilder: (context) => [
@@ -50,10 +54,15 @@ class AppSettingsMenu extends ConsumerWidget {
         PopupMenuItem(value: _MenuAction.english, child: Text('english'.tr())),
         PopupMenuItem(value: _MenuAction.bangla, child: Text('bangla'.tr())),
         PopupMenuItem(value: _MenuAction.arabic, child: Text('arabic'.tr())),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _MenuAction.guide,
+          child: Text('onb_menu_guide'.tr()),
+        ),
       ],
       icon: const Icon(Icons.tune),
     );
   }
 }
 
-enum _MenuAction { system, light, dark, english, bangla, arabic }
+enum _MenuAction { system, light, dark, english, bangla, arabic, guide }

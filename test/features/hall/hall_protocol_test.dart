@@ -27,9 +27,9 @@ void main() {
       for (final text in [
         '',
         'https://example.com',
-        'examguard://join?h=1.2.3.4&p=0&t=X',
-        'examguard://join?h=1.2.3.4&p=47800',
-        'examguard://other?h=1.2.3.4&p=47800&t=X',
+        'pahara://join?h=1.2.3.4&p=0&t=X',
+        'pahara://join?h=1.2.3.4&p=47800',
+        'pahara://other?h=1.2.3.4&p=47800&t=X',
       ]) {
         expect(HallInvite.parse(text), isNull, reason: text);
       }

@@ -1,3 +1,4 @@
+import 'package:exam_guard/core/utils/app_brand.dart';
 import 'package:exam_guard/features/scanner/model/new_device_alert.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/repository/wireless_classifier.dart';
@@ -19,8 +20,6 @@ class NodeAlertTracker {
 
   /// Older entries are forgotten (and can't be matched as rotations).
   static const Duration forgetAfter = Duration(minutes: 15);
-
-  static const String _nodePrefix = 'examguard';
 
   final Map<String, Map<String, _Track>> _nodes = {};
 
@@ -65,7 +64,7 @@ class NodeAlertTracker {
       }
       if (!t.firstSeen.isAfter(baselineAt)) t.known = true;
       if (t.known || t.alerted || isTrusted(d.id)) continue;
-      if (d.name.trim().toLowerCase().startsWith(_nodePrefix)) continue;
+      if (AppBrand.isNodeName(d.name)) continue;
       if (!_strongEnough(d)) continue;
       if (d.isBle && t.lastSeen.difference(t.firstSeen) < confirmSpan) {
         continue;

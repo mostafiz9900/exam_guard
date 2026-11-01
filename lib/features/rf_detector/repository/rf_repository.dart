@@ -1,5 +1,6 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/utils/app_brand.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/classic_bluetooth/i_classic_bluetooth_service.dart';
 import 'package:exam_guard/core/services/wifi/i_wifi_scan_service.dart';
@@ -12,7 +13,7 @@ class RfPacket {
     required this.sourceName,
     required this.rssi,
     required this.timestamp,
-    required this.isExamGuardNode,
+    required this.isPaharaNode,
   });
 
   final String sourceId;
@@ -20,10 +21,10 @@ class RfPacket {
   final int rssi;
   final DateTime timestamp;
 
-  /// True when the sender's name starts with [RfRepository.nodeNamePrefix].
+  /// True when the sender is a Pahara sensor node (by its name).
   /// Generic ESP32 boards are NOT nodes: a DIY ESP32 is a typical cheating
   /// device.
-  final bool isExamGuardNode;
+  final bool isPaharaNode;
 }
 
 /// Live 2.4 GHz activity from the phone's Bluetooth radio.
@@ -38,11 +39,8 @@ class RfRepository {
 
   static const String _scanOwner = 'rf_detector';
 
-  /// Advertised-name prefix of ExamGuard hardware nodes (case-insensitive).
-  static const String nodeNamePrefix = 'examguard';
-
-  static bool isExamGuardNodeName(String name) =>
-      name.trim().toLowerCase().startsWith(nodeNamePrefix);
+  /// True for a Pahara sensor node's advertised name (see [AppBrand]).
+  static bool isPaharaNodeName(String name) => AppBrand.isNodeName(name);
 
   final IBluetoothService _bluetooth;
   final IPermissionService _permissions;
@@ -92,7 +90,7 @@ class RfRepository {
       sourceName: r.name,
       rssi: r.rssi,
       timestamp: r.timestamp,
-      isExamGuardNode: isExamGuardNodeName(r.name),
+      isPaharaNode: isPaharaNodeName(r.name),
     ),
   );
 }

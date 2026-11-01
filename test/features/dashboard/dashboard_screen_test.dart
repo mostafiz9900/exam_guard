@@ -444,7 +444,7 @@ void main() {
       'Tracking radar': AppRoute.radar,
       'Magnetic scan': AppRoute.magnetic,
       'Report': AppRoute.report,
-      'RF activity meter': AppRoute.rfDetector,
+      'RF meter': AppRoute.rfDetector,
       'Log incident': AppRoute.actionNew,
     };
     for (final MapEntry(key: title, value: route) in cards.entries) {
@@ -916,12 +916,12 @@ void main() {
       final h = await _pump(tester);
       await tester.binding.handlePopRoute();
       await _frames(tester, 4);
-      expect(find.text('Leave ExamGuard?'), findsOneWidget);
+      expect(find.text('Leave Pahara?'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
       await tester.tap(find.text('Cancel'));
       await _frames(tester, 4);
-      expect(find.text('Leave ExamGuard?'), findsNothing);
+      expect(find.text('Leave Pahara?'), findsNothing);
       expect(h.location, AppRoute.dashboard);
       expect(
         platformCalls.where((c) => c.method == 'SystemNavigator.pop'),
@@ -956,7 +956,7 @@ void main() {
       await _frames(tester, 4);
       await tester.tap(find.text('End exam…'));
       await _frames(tester, 4);
-      expect(find.text('Leave ExamGuard?'), findsNothing);
+      expect(find.text('Leave Pahara?'), findsNothing);
       expect(find.text('End exam session?'), findsOneWidget);
 
       await tester.tap(

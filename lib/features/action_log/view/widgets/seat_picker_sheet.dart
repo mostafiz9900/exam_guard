@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:exam_guard/core/widgets/app_bottom_sheet.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/theme/app_colors.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
@@ -24,9 +25,8 @@ Future<String?> showSeatPickerSheet(
   required Map<String, SeatSummary> summaries,
   String? selected,
 }) {
-  return showModalBottomSheet<String>(
+  return showAppBottomSheet<String>(
     context: context,
-    isScrollControlled: true,
     showDragHandle: true,
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(

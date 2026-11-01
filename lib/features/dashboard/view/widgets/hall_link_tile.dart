@@ -13,6 +13,7 @@ import 'package:exam_guard/features/hall/view_model/hall_view_model.dart';
 
 /// Hall link at a glance: off, live (members / nodes / shared devices), lost,
 /// or — most important — the newest alert from another invigilator.
+/// Offline sensor nodes are shown on the sensor nodes tile.
 class HallLinkTile extends ConsumerWidget {
   const HallLinkTile({super.key});
 
@@ -33,13 +34,6 @@ class HallLinkTile extends ConsumerWidget {
             colors.error,
             'dash_hall_alerts'.tr(args: {'count': '${pending.length}'}),
             remoteAlertText(pending.first),
-          )
-        : state.offlineNodes.isNotEmpty
-        ? (
-            Icons.sensors_off_rounded,
-            colors.error,
-            'hall_nodes_offline_title'.tr(),
-            state.offlineNodes.map((n) => n.member.name).join(', '),
           )
         : !state.isActive
         ? (

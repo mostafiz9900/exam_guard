@@ -1,9 +1,12 @@
-// RF activity meter screen: small-phone rendering (light/dark), explicit
+// RF meter screen: small-phone rendering (light/dark), explicit
 // not-measuring states (never "quiet" without a scan), threat level driven by
 // fake packets, the shared buzzer, the guide sheet and the incident hand-off.
 // No real radio, permission or audio plugin is touched.
 
 import 'dart:async';
+
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
@@ -22,11 +25,14 @@ import 'package:exam_guard/features/rf_detector/view/widgets/guide_step_tile.dar
 import 'package:exam_guard/features/rf_detector/view/widgets/rf_wave_painter.dart';
 import 'package:exam_guard/features/rf_detector/view_model/rf_detector_view_model.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../responsive/responsive_test.dart' show loadFonts;
 
 // ---------------------------------------------------------------- fakes
 
@@ -320,14 +326,17 @@ class _Harness {
           ],
           child: Builder(
             builder: (context) => AppScreenSize(
-              builder: (_) => MaterialApp.router(
-                theme: AppTheme.lightTheme,
-                darkTheme: AppTheme.darkTheme,
-                themeMode: mode,
-                localizationsDelegates: context.localizationDelegates,
-                supportedLocales: context.supportedLocales,
-                locale: context.locale,
-                routerConfig: router,
+              builder: (_) => RepaintBoundary(
+                key: _shotKey,
+                child: MaterialApp.router(
+                  theme: AppTheme.lightTheme,
+                  darkTheme: AppTheme.darkTheme,
+                  themeMode: mode,
+                  localizationsDelegates: context.localizationDelegates,
+                  supportedLocales: context.supportedLocales,
+                  locale: context.locale,
+                  routerConfig: router,
+                ),
               ),
             ),
           ),
@@ -380,6 +389,22 @@ Text _gaugeText(WidgetTester tester) {
 
 Finder _textContaining(String s) => find.textContaining(s, findRichText: true);
 
+final _shotDir = Platform.environment['RF_SHOTS'];
+final _shotKey = GlobalKey();
+
+/// With `RF_SHOTS=dir`, saves the screen as `dir/name.png`.
+Future<void> _shot(WidgetTester tester, String name) async {
+  final dir = _shotDir;
+  if (dir == null) return;
+  await tester.runAsync(() async {
+    final boundary =
+        _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 2);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    File('$dir/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+  });
+}
+
 Future<void> _leaveScreen(WidgetTester tester) async {
   // Dispose the tree: autoDispose VM runs its cleanup.
   await tester.pumpWidget(const SizedBox());
@@ -391,6 +416,36 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     await EasyLocalization.ensureInitialized();
+    // Real fonts only for screenshots; the layout tests keep the wide
+    // default test font (stricter for overflow).
+    if (_shotDir != null) await loadFonts();
+  });
+
+  testWidgets('visual tour (RF_SHOTS)', (tester) async {
+    if (_shotDir == null) return;
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      final h = _Harness();
+      await h.pump(tester, mode: mode);
+      await _shot(tester, 'rf_${mode.name}_quiet');
+      await h.feed(tester, [_packet('AA', -62, name: 'Galaxy Buds')]);
+      await _shot(tester, 'rf_${mode.name}_moderate');
+      for (var i = 0; i < 8; i++) {
+        await h.feed(tester, [_packet('BB', -42, name: 'Hidden earbud')]);
+      }
+      await _shot(tester, 'rf_${mode.name}_strong');
+      await tester.drag(
+        find.byType(SingleChildScrollView).first,
+        const Offset(0, -2000),
+      );
+      await tester.pump();
+      await _shot(tester, 'rf_${mode.name}_strong_end');
+      await _leaveScreen(tester);
+    }
+    final off = _Harness();
+    off.bluetooth.status = BleAdapterStatus.off;
+    await off.pump(tester);
+    await _shot(tester, 'rf_off');
+    await _leaveScreen(tester);
   });
 
   // ------------------------------------------------------------ rendering
@@ -401,9 +456,9 @@ void main() {
       (tester) async {
         final h = _Harness();
         await h.pump(tester, mode: mode);
-        expect(find.text('RF activity meter'), findsOneWidget);
+        expect(find.text('RF meter'), findsOneWidget);
         expect(find.text('LIVE'), findsOneWidget);
-        expect(find.text('QUIET (below -70 dBm)'), findsOneWidget);
+        expect(find.text('Nothing close'), findsOneWidget);
         expect(find.text('Retry'), findsNothing);
         // Scroll through everything to lay it all out.
         await tester.drag(
@@ -473,7 +528,7 @@ void main() {
       await h.settleStart(tester);
       expect(h.state.isMeasuring, isTrue);
       expect(find.text('LIVE'), findsOneWidget);
-      expect(find.text('QUIET (below -70 dBm)'), findsOneWidget);
+      expect(find.text('Nothing close'), findsOneWidget);
       expect(find.text('Retry'), findsNothing);
       expect(h.bluetooth.owners, contains('rf_detector'));
       await _leaveScreen(tester);
@@ -517,7 +572,7 @@ void main() {
       await tester.pump();
       await tester.pump();
       expectNotQuiet(tester, h);
-      expect(_textContaining('Location is off'), findsOneWidget);
+      expect(_textContaining('Turn on Location (GPS)'), findsOneWidget);
       expect(
         find.textContaining('Measuring resumes automatically'),
         findsOneWidget,
@@ -581,19 +636,14 @@ void main() {
     await h.feed(tester, [_packet('AA', -85, name: 'Far phone')]);
     expect(h.state.threatLevel, RfThreatLevel.quiet);
     expect(_gaugeText(tester).data, '-85');
-    expect(find.text('QUIET (below -70 dBm)'), findsOneWidget);
-    expect(
-      find.text('1 transmitters • 1 packets/s • strongest: Far phone'),
-      findsOneWidget,
-    );
+    expect(find.text('Nothing close'), findsOneWidget);
+    expect(find.text('Strongest: Far phone'), findsOneWidget);
 
     // Moderate.
     await h.feed(tester, [_packet('BB', -60)]);
     expect(h.state.threatLevel, RfThreatLevel.moderate);
-    expect(
-      find.text('ACTIVE TRANSMITTER NEARBY (-70 to -50 dBm)'),
-      findsOneWidget,
-    );
+    expect(find.text('A transmitter is within a few metres'), findsOneWidget);
+    expect(find.text('Device nearby'), findsOneWidget);
     expect(_gaugeText(tester).style?.color, _amber);
     // Unnamed source falls back to its id.
     expect(h.state.strongestSourceName, 'BB');
@@ -602,15 +652,14 @@ void main() {
     // Strong.
     await h.feed(tester, [_packet('CC', -42, name: 'Earbud')]);
     expect(h.state.threatLevel, RfThreatLevel.strong);
-    expect(
-      find.text('STRONG TRANSMITTER VERY CLOSE (above -50 dBm)'),
-      findsOneWidget,
-    );
+    expect(find.text('A transmitter is within about 1 metre'), findsOneWidget);
+    expect(find.text('Very close'), findsOneWidget);
     expect(_gaugeText(tester).style?.color, _red);
-    expect(find.text('Peak: -42 dBm'), findsOneWidget);
+    expect(find.text('-42 dBm'), findsOneWidget);
     final painter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
-        .map((c) => c.painter)
+        // The line is drawn over the zone bands.
+        .expand((c) => [c.painter, c.foregroundPainter])
         .whereType<RfWavePainter>()
         .single;
     expect(painter.color, _red);
@@ -641,7 +690,8 @@ void main() {
     // Peak is kept, gauge shows "--" while silent.
     expect(h.state.peakDbm, -40);
     expect(_gaugeText(tester).data, '--');
-    expect(find.text('0 transmitters • 0 packets/s'), findsOneWidget);
+    expect(h.state.activeTransmitters, 0);
+    expect(find.text('Strongest: Far phone'), findsNothing);
     await _leaveScreen(tester);
   });
 
@@ -660,13 +710,13 @@ void main() {
     await _leaveScreen(tester);
   });
 
-  testWidgets('ExamGuard hardware node shows the node badge', (tester) async {
+  testWidgets('Pahara hardware node shows the node badge', (tester) async {
     final h = _Harness();
     await h.pump(tester);
-    await h.feed(tester, [_packet('NN', -80, name: 'ExamGuard-Node-1')]);
-    expect(h.state.hardwareNodeName, 'ExamGuard-Node-1');
-    expect(find.text('EXAMGUARD NODE NEARBY'), findsOneWidget);
-    expect(find.text('ExamGuard-Node-1'), findsOneWidget);
+    await h.feed(tester, [_packet('NN', -80, name: 'Pahara-Node-1')]);
+    expect(h.state.hardwareNodeName, 'Pahara-Node-1');
+    expect(find.text('PAHARA NODE NEARBY'), findsOneWidget);
+    expect(find.text('Pahara-Node-1'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await _leaveScreen(tester);
   });
@@ -756,7 +806,7 @@ void main() {
     expect(find.byType(GuideStepTile), findsNWidgets(3));
     expect(find.text('What this meter measures'), findsOneWidget);
     expect(find.text('Finding a hidden transmitter'), findsOneWidget);
-    expect(find.text('ExamGuard hardware node'), findsOneWidget);
+    expect(find.text('Pahara hardware node'), findsOneWidget);
     for (final n in ['1', '2', '3']) {
       expect(find.text(n), findsOneWidget);
     }
@@ -865,7 +915,7 @@ void main() {
         );
       await h.pump(tester);
       expect(h.state.errorKey, RfDetectorViewModel.scanThrottledErrorKey);
-      expect(find.textContaining('Android paused scanning'), findsNWidgets(2));
+      expect(find.textContaining('Android paused scanning'), findsOneWidget);
       await _leaveScreen(tester);
     });
 

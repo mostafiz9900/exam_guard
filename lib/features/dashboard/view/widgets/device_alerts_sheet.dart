@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import 'package:exam_guard/core/widgets/app_bottom_sheet.dart';
 import 'package:exam_guard/features/scanner/view/distance_text.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
@@ -16,10 +17,8 @@ import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 /// Acknowledge actions. [context] is the dashboard's, used to navigate after
 /// the sheet closes.
 Future<void> showDeviceAlertsSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+  return showAppBottomSheet<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
     showDragHandle: true,
     builder: (sheetContext) => DraggableScrollableSheet(
       expand: false,

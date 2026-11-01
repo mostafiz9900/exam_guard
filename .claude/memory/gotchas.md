@@ -196,3 +196,40 @@
 - **What Happens**: Apple's proximity-pairing status byte is undocumented; open-source decoders (LibrePods, LinuxPods, OpenPods) disagree on the bits and captures have contradicted them; AirPods 4 reportedly don't send it.
 - **How to Avoid**: Only identify AirPods (type 0x07). Never show in-ear/in-case status — a wrong claim could accuse a student. Covert earpiece names (`BluetoothDeviceInspector.isSpyEarpieceName`: loop / neckloop / induction / spy / nano / hands-free, whole words, not Arduino/iPod) set `isHighSuspicion`.
 - **Discovered**: 2026-10-26
+
+#### Timeline / room profile / evidence / lens finder (2026-10-26)
+- **Presence**: `PresenceTracker` — gone after 30 s (matches eviction); "toggling" = ≥3 returns in 15 min, BLE only (classic/Wi-Fi scan every 35–65 s and would always "toggle").
+- **Room profile**: saved on baseline, only `isRoomEquipment` devices (Wi-Fi APs, classic fixtures, named BLE gear) — never phones/earbuds/hotspots. Keyed by `RoomProfile.keyOf(room)`.
+- **Evidence**: `ActionEntryViewModel.evidenceFor` reads scanner history only if `ref.exists(scannerViewModelProvider)` — never start a scan for it. Session/evidence models don't import scanner (scanner → session dependency already exists).
+- **Lens finder**: points within `LensDetector.nearLightCells` of a large bright area are rejected (lamp edges). In widget tests don't `await` VM calls that cancel streams created during `runAsync` — start the screen in the state you want instead.
+- **Discovered**: 2026-10-26
+
+#### radar — Opening the radar without a device was a dead end
+- **What Happens**: Dashboard "Tracking radar" pushed /radar with no target → "No target device selected" screen; users thought the radar was broken. "Open scanner" then stacked a second radar.
+- **How to Avoid**: No target → in-screen `RadarDevicePicker` (BLE only, closest first, search, "Not trusted"); while tracking, ⇄ "Track another device" switches via `setTargetDevice` in place. `_startTracking` must check `ref.mounted` (and that the target is unchanged) after every await — switching then leaving used state after dispose.
+- **Discovered**: 2026-10-27
+
+#### UI — Tall bottom sheets trapped the user
+- **What Happens**: The device details sheet (after the Activity chart was added) grew taller than the screen with `isScrollControlled: true`, covered the app bar and had no close button; on iPhone there is no back button, and dragging down only scrolled.
+- **How to Avoid**: Always `showAppBottomSheet` (core/widgets/app_bottom_sheet.dart): safe area, max 90% height, drag handle. A guard test fails on direct `showModalBottomSheet(`. Long sheets also get a ✕ in their header.
+- **Discovered**: 2026-10-27
+
+#### magnetic — iPhone raw magnetometer looked like a magnet everywhere
+- **What Happens**: sensors_plus on iOS uses the *raw* magnetometer, which includes the phone's own bias (often hundreds of µT) → the >200 µT rule fired constantly and merely rotating the phone read as a magnet. The baseline was also the first sample (one glitch = wrong zero), never followed slow drift, and the delayed publish timer wrote a stale baseline back over a fresh one.
+- **How to Avoid**: iOS reads Core Motion's calibrated `CMDeviceMotion.magneticField` via EventChannel `exam_guard/magnetometer` (AppDelegate, implicit engine); falls back to sensors_plus with `isCalibrated: false` (absolute rule disabled, raw-sensor note shown). All-zero calibrated samples = uncalibrated → figure-8 prompt. Baseline = median of first `settleSamples` (tests set it to 1), follows drift only while normal and change < 0.6×T. `_publishPending()` must never touch the baseline. Android `TYPE_MAGNETIC_FIELD` is already calibrated. Accuracy `uncalibrated` with a non-zero field = raw (no absolute rule). When accuracy improves the bias estimate jumps → re-settle the baseline. Resume re-settles an auto baseline (keeps "Set zero"). "Biggest change" is `peakChange` (max |Δ|) — a magnet can lower the field, so never derive it from the max magnitude.
+- **Discovered**: 2026-10-27
+
+#### node_setup — ESP32 only joins 2.4 GHz; setup Wi-Fi details
+- **What Happens**: iPhone hotspot defaults to 5 GHz on newer models → the node reports `no_network`. A node's setup closes after 5 min (kept open while the app is connected).
+- **How to Avoid**: The wizard and README tell users to turn on "Maximize Compatibility". The node checks the host port after joining: `no_host` is NOT a failure (hall simply not hosted yet). The hotspot password lives only in the view model draft (for retry / next node), never in storage; only the SSID is remembered (`node_setup_last_ssid`). Hall members are keyed by the node's hello id (`N-` + last 3 MAC bytes), which the wizard uses to see the node go live.
+- **Discovered**: 2026-11-01
+
+#### hall_map — Node device ids are MACs; iPhones can't follow them
+- **What Happens**: Nodes report real BLE MAC addresses; iOS exposes per-phone UUIDs instead, so the radar on an iPhone never matches a node-located device.
+- **How to Avoid**: "Walk to it with the radar" only on Android. Fingerprinting across rotations already exists (scanner `_identityRoot` / `device_grouping.dart`) — don't rebuild it.
+- **Discovered**: 2026-11-01
+
+#### branding — Icon art had a fake transparency checkerboard; res/values/styles.xml got deleted
+- **What Happens**: The supplied icon (AI art) has the grey/white transparency checkerboard baked into its pixels, so Asset Studio output showed squares in the corners. Copying its `res/` output also deleted `values/styles.xml`, which holds LaunchTheme/NormalTheme (the build breaks without it).
+- **How to Avoid**: Re-cut the circular emblem (radius 230 px on the 512 source) and regenerate. A script that rebuilds every Android/iOS/store/splash size is described in .claude/modules/onboarding.md. Splash navy `#0B1628` = `BrandColors.navy` = `@color/splash_background`. Android 12+ uses `values-v31/styles.xml`.
+- **Discovered**: 2026-11-01

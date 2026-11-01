@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.exam_guard"
+    namespace = "com.it24617.pahara.app"
     // permission_handler 13 compiles against Android 17 (API 37).
     compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
@@ -17,7 +17,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.exam_guard"
+        applicationId = "com.it24617.pahara.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

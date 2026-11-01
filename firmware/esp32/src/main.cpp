@@ -1,4 +1,4 @@
-// ExamGuard sensor node.
+// Pahara sensor node.
 //
 // Scans BLE advertisements continuously and Wi-Fi access points every 30 s,
 // and every 2 s sends the strongest devices (raw clues: manufacturer id,
@@ -6,8 +6,11 @@
 // WebSocket. The app classifies them with the phones' own rules.
 // Protocol: lib/features/hall/repository/hall_protocol.dart (v1).
 //
-// Setup from a phone: hold BOOT 3 s (or first start without settings) →
-// Wi-Fi "ExamGuard-Setup-XXXXXX" opens for 5 minutes → fill in the page.
+// Setup (first start without settings, or hold BOOT 3 s) for 5 minutes:
+// - from the Pahara app over Bluetooth: Sensor nodes → Add a node. The
+//   app sends the hotspot, password and node key; the node tests them live.
+//   Protocol: lib/features/node_setup/model/node_setup_protocol.dart (v1).
+// - fallback from any phone: Wi-Fi "Pahara-Setup-XXXXXX" → setup page.
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -33,6 +36,7 @@
 namespace {
 
 constexpr int kProtocolVersion = 1;
+constexpr const char* kFirmwareVersion = "1.1.0";
 constexpr uint32_t kSendEveryMs = 2000;
 constexpr uint32_t kWifiScanEveryMs = 30000;
 // Only devices heard recently, about inside the hall, are sent.
@@ -56,36 +60,48 @@ struct Settings {
   String key;
   String name;
   String hub;
+  // Hotspot set up from the app. Empty: the page's saved Wi-Fi, or
+  // node_config.h.
+  String ssid;
+  String pass;
 };
 
 Settings gSettings;
 Preferences gPrefs;
 String gSuffix;  // last 3 MAC bytes, e.g. "A1B2C3"
+String gNodeId;  // "N-A1B2C3"
 
 String normalizeName(String name) {
   name.trim();
-  if (name.isEmpty()) return "ExamGuard-Node-" + gSuffix;
+  if (name.isEmpty()) return "Pahara-Node-" + gSuffix;
   String lower = name;
   lower.toLowerCase();
-  // Phones trust "ExamGuard…" names as ExamGuard hardware.
-  return lower.startsWith("examguard") ? name : "ExamGuard-" + name;
+  // Phones trust "Pahara…" names as Pahara hardware ("Pahara…" is the
+  // name before the rename and is still trusted).
+  return lower.startsWith("pahara") || lower.startsWith("examguard")
+             ? name
+             : "Pahara-" + name;
 }
 
 void loadSettings() {
-  gPrefs.begin("examguard", true);
+  gPrefs.begin("pahara", true);
   gSettings.key = gPrefs.getString("key", NODE_KEY);
   gSettings.name = normalizeName(gPrefs.getString("name", NODE_NAME));
   gSettings.hub = gPrefs.getString("hub", HUB_HOST);
+  gSettings.ssid = gPrefs.getString("ssid", "");
+  gSettings.pass = gPrefs.getString("pass", "");
   gPrefs.end();
   gSettings.key.trim();
   gSettings.hub.trim();
 }
 
 void saveSettings(const Settings& s) {
-  gPrefs.begin("examguard", false);
+  gPrefs.begin("pahara", false);
   gPrefs.putString("key", s.key);
   gPrefs.putString("name", s.name);
   gPrefs.putString("hub", s.hub);
+  gPrefs.putString("ssid", s.ssid);
+  gPrefs.putString("pass", s.pass);
   gPrefs.end();
 }
 
@@ -193,8 +209,8 @@ ScanCallbacks gScanCallbacks;
 
 void startBle() {
   NimBLEDevice::init(gSettings.name.c_str());
-  // Advertise our name so phones recognise this board as ExamGuard
-  // hardware (the app trusts the "ExamGuard" prefix).
+  // Advertise our name so phones recognise this board as Pahara
+  // hardware (the app trusts the "Pahara" prefix).
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   adv->setName(gSettings.name.c_str());
   adv->start();
@@ -235,16 +251,253 @@ void pollWifiScan() {
   }
 }
 
-// ── Setup page ───────────────────────────────────────────────────────────
+// ── Setup ────────────────────────────────────────────────────────────────
+// Open for 5 minutes, only on a first start or when BOOT is held — never
+// because Wi-Fi failed, so a switched-off hotspot during an exam can't
+// open a door into the node. Two ways in, at the same time:
+//
+// 1. The Pahara app over Bluetooth (GATT service below). The app reads
+//    what this node is and which Wi-Fi networks it sees, writes the
+//    hotspot, password, node key and name, and follows each step live:
+//    joining → wifi_ok → host_ok / no_host → saved (then restart), or
+//    no_network / bad_password / wifi_failed (setup stays open to retry).
+// 2. Fallback for any phone: Wi-Fi "Pahara-Setup-XXXXXX" → setup page.
 
-// Opens the "ExamGuard-Setup-…" Wi-Fi for 5 minutes. Never called because
-// Wi-Fi failed: only on the BOOT button or a first start, so a switched-off
-// hotspot during an exam can't open a door into the node.
-[[noreturn]] void runSetupPortal() {
-  Serial.println("[setup] opening setup Wi-Fi for 5 minutes");
+constexpr const char* kSetupService = "e9a40001-5c1d-4b6a-9e2f-3d8c7b1a0e01";
+constexpr const char* kInfoChar = "e9a40002-5c1d-4b6a-9e2f-3d8c7b1a0e01";
+constexpr const char* kNetworksChar = "e9a40003-5c1d-4b6a-9e2f-3d8c7b1a0e01";
+constexpr const char* kConfigChar = "e9a40004-5c1d-4b6a-9e2f-3d8c7b1a0e01";
+constexpr const char* kStatusChar = "e9a40005-5c1d-4b6a-9e2f-3d8c7b1a0e01";
+constexpr size_t kMaxNetworks = 12;
+constexpr uint32_t kJoinTimeoutMs = 20000;
+constexpr uint32_t kHostCheckMs = 3000;
+
+struct SetupRequest {
+  bool scan = false;
+  bool apply = false;
+  Settings next;
+};
+
+std::mutex gSetupLock;
+SetupRequest gRequest;
+volatile bool gPhoneConnected = false;
+NimBLECharacteristic* gInfoChar = nullptr;
+NimBLECharacteristic* gNetworksChar = nullptr;
+NimBLECharacteristic* gStatusChar = nullptr;
+std::vector<String> gVisibleSsids;
+
+void setStatus(const char* state, const String& detail = "") {
+  Serial.printf("[setup] %s %s\n", state, detail.c_str());
+  if (gStatusChar == nullptr) return;
+  JsonDocument doc;
+  doc["s"] = state;
+  if (!detail.isEmpty()) doc["d"] = detail;
+  String text;
+  serializeJson(doc, text);
+  gStatusChar->setValue(text.c_str());
+  gStatusChar->notify();
+}
+
+void publishInfo() {
+  JsonDocument doc;
+  doc["v"] = kProtocolVersion;
+  doc["id"] = gNodeId;
+  doc["name"] = gSettings.name;
+  doc["fw"] = kFirmwareVersion;
+  doc["key"] = !gSettings.key.isEmpty();
+  if (!gSettings.ssid.isEmpty()) doc["ssid"] = gSettings.ssid;
+  String text;
+  serializeJson(doc, text);
+  gInfoChar->setValue(text.c_str());
+}
+
+// Blocking scan (~2–4 s); only in setup, when nothing else runs.
+void scanNetworksForSetup() {
+  const int16_t n = WiFi.scanNetworks(false, false);
+  struct Net {
+    String ssid;
+    int rssi;
+    bool open;
+  };
+  std::vector<Net> nets;
+  for (int i = 0; i < n; i++) {
+    const String ssid = WiFi.SSID(i);
+    if (ssid.isEmpty()) continue;
+    const auto same = std::find_if(nets.begin(), nets.end(),
+                                   [&](const Net& x) { return x.ssid == ssid; });
+    if (same != nets.end()) {
+      same->rssi = std::max(same->rssi, static_cast<int>(WiFi.RSSI(i)));
+      continue;
+    }
+    nets.push_back({ssid, WiFi.RSSI(i),
+                    WiFi.encryptionType(i) == WIFI_AUTH_OPEN});
+  }
+  WiFi.scanDelete();
+  std::sort(nets.begin(), nets.end(),
+            [](const Net& a, const Net& b) { return a.rssi > b.rssi; });
+  if (nets.size() > kMaxNetworks) nets.resize(kMaxNetworks);
+
+  gVisibleSsids.clear();
+  JsonDocument doc;
+  JsonArray list = doc.to<JsonArray>();
+  for (const Net& net : nets) {
+    gVisibleSsids.push_back(net.ssid);
+    JsonObject o = list.add<JsonObject>();
+    o["s"] = net.ssid;
+    o["r"] = net.rssi;
+    if (net.open) o["o"] = 1;
+  }
+  String text;
+  serializeJson(doc, text);
+  if (gNetworksChar != nullptr) gNetworksChar->setValue(text.c_str());
+  Serial.printf("[setup] %d Wi-Fi networks nearby\n",
+                static_cast<int>(nets.size()));
+}
+
+class SetupServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer*, NimBLEConnInfo&) override {
+    gPhoneConnected = true;
+    Serial.println("[setup] phone connected over Bluetooth");
+  }
+
+  void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int) override {
+    gPhoneConnected = false;
+    NimBLEDevice::startAdvertising();
+  }
+};
+
+class ConfigCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+    JsonDocument doc;
+    const std::string value = c->getValue();
+    if (deserializeJson(doc, value) || (doc["v"] | 0) != kProtocolVersion) {
+      setStatus("bad_request");
+      return;
+    }
+    std::lock_guard<std::mutex> guard(gSetupLock);
+    if (strcmp(doc["cmd"] | "", "scan") == 0) {
+      gRequest.scan = true;
+      return;
+    }
+    Settings next = gSettings;
+    next.ssid = doc["ssid"] | "";
+    next.pass = doc["pass"] | "";
+    const String key = doc["key"] | "";
+    if (!key.isEmpty()) next.key = key;
+    next.name = normalizeName(doc["name"] | "");
+    next.hub = doc["hub"] | "";
+    next.ssid.trim();
+    next.key.trim();
+    next.hub.trim();
+    if (next.ssid.isEmpty() || next.key.isEmpty()) {
+      setStatus("bad_request");
+      return;
+    }
+    gRequest.next = next;
+    gRequest.apply = true;
+  }
+};
+
+SetupServerCallbacks gSetupServerCallbacks;
+ConfigCallbacks gConfigCallbacks;
+
+void startSetupBluetooth() {
+  const String name = "Pahara-Setup-" + gSuffix;
+  if (NimBLEDevice::isInitialized()) {
+    NimBLEDevice::getScan()->stop();
+    NimBLEDevice::stopAdvertising();
+  } else {
+    NimBLEDevice::init(name.c_str());
+  }
+  NimBLEDevice::setMTU(247);
+
+  NimBLEServer* server = NimBLEDevice::createServer();
+  server->setCallbacks(&gSetupServerCallbacks, false);
+  NimBLEService* svc = server->createService(kSetupService);
+  gInfoChar = svc->createCharacteristic(kInfoChar, NIMBLE_PROPERTY::READ);
+  gNetworksChar =
+      svc->createCharacteristic(kNetworksChar, NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic* config = svc->createCharacteristic(
+      kConfigChar, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  config->setCallbacks(&gConfigCallbacks);
+  gStatusChar = svc->createCharacteristic(
+      kStatusChar, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  gStatusChar->setValue("{\"s\":\"ready\"}");
+  gNetworksChar->setValue("[]");
+  publishInfo();
+  svc->start();
+
+  // The 128-bit service id fills the advertisement; the name goes in the
+  // scan response.
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  NimBLEAdvertisementData advData;
+  advData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
+  advData.setCompleteServices(NimBLEUUID(kSetupService));
+  NimBLEAdvertisementData scanData;
+  scanData.setName(name.c_str());
+  adv->setAdvertisementData(advData);
+  adv->setScanResponseData(scanData);
+  adv->start();
+  Serial.printf("[setup] Bluetooth \"%s\" ready for the app\n", name.c_str());
+}
+
+// Joins the hotspot to prove the password, then checks the host phone.
+// Returns true when the Wi-Fi works (the host may simply not host yet).
+bool tryWifi(const Settings& next) {
+  setStatus("joining", next.ssid);
+  const bool visible =
+      std::find(gVisibleSsids.begin(), gVisibleSsids.end(), next.ssid) !=
+      gVisibleSsids.end();
+  WiFi.disconnect(false, false);
+  delay(100);
+  WiFi.begin(next.ssid.c_str(), next.pass.c_str());
+  const uint32_t start = millis();
+  wl_status_t st = WiFi.status();
+  while (st != WL_CONNECTED && millis() - start < kJoinTimeoutMs) {
+    if (st == WL_CONNECT_FAILED) break;
+    if (st == WL_NO_SSID_AVAIL && millis() - start > 8000) break;
+    delay(100);
+    st = WiFi.status();
+  }
+  if (st != WL_CONNECTED) {
+    WiFi.disconnect(false, false);
+    if (st == WL_NO_SSID_AVAIL || (!visible && !gVisibleSsids.empty())) {
+      setStatus("no_network", next.ssid);
+    } else if (st == WL_CONNECT_FAILED) {
+      setStatus("bad_password", next.ssid);
+    } else {
+      setStatus("wifi_failed", next.ssid);
+    }
+    return false;
+  }
+  setStatus("wifi_ok", WiFi.localIP().toString());
+
+  WiFiClient probe;
+  const bool hostUp =
+      next.hub.isEmpty()
+          ? probe.connect(WiFi.gatewayIP(), HUB_PORT, kHostCheckMs)
+          : probe.connect(next.hub.c_str(), HUB_PORT, kHostCheckMs);
+  probe.stop();
+  setStatus(hostUp ? "host_ok" : "no_host");
+  return true;
+}
+
+[[noreturn]] void restartSoon() {
+  delay(1500);  // let the last notification reach the phone
+  ESP.restart();
+  for (;;) {
+  }
+}
+
+[[noreturn]] void runSetup() {
+  Serial.println("[setup] open for 5 minutes (Bluetooth + Wi-Fi page)");
   gLed = LedMode::setup;
-  if (NimBLEDevice::isInitialized()) NimBLEDevice::getScan()->stop();
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setAutoReconnect(false);
+  startSetupBluetooth();
+  scanNetworksForSetup();
 
+  // Fallback web page, non-blocking so Bluetooth requests run alongside.
   const bool hasKey = !gSettings.key.isEmpty();
   WiFiManager wm;
   WiFiManagerParameter keyField(
@@ -260,37 +513,64 @@ void pollWifiScan() {
   wm.addParameter(&nameField);
   wm.addParameter(&hubField);
 
-  bool saved = false;
-  wm.setSaveParamsCallback([&saved] { saved = true; });
-  wm.setSaveConfigCallback([&saved] { saved = true; });
+  bool pageSaved = false;
+  wm.setSaveParamsCallback([&pageSaved] { pageSaved = true; });
+  wm.setSaveConfigCallback([&pageSaved] { pageSaved = true; });
   wm.setBreakAfterConfig(true);  // keep settings even if Wi-Fi test fails
-  wm.setConfigPortalTimeout(kSetupPortalSeconds);
-  wm.setTitle("ExamGuard sensor node");
+  wm.setConfigPortalBlocking(false);
+  wm.setTitle("Pahara sensor node");
   std::vector<const char*> menu = {"wifi", "exit"};
   wm.setMenu(menu);
-
-  const String ap = "ExamGuard-Setup-" + gSuffix;
+  const String ap = "Pahara-Setup-" + gSuffix;
   Serial.printf("[setup] Wi-Fi \"%s\", password \"%s\"\n", ap.c_str(),
                 SETUP_PASSWORD);
   wm.startConfigPortal(ap.c_str(), SETUP_PASSWORD);
 
-  if (saved) {
-    Settings next = gSettings;
-    String key = keyField.getValue();
-    key.trim();
-    if (!key.isEmpty()) next.key = key;
-    next.name = normalizeName(nameField.getValue());
-    next.hub = hubField.getValue();
-    next.hub.trim();
-    saveSettings(next);
-    Serial.printf("[setup] saved, node name %s\n", next.name.c_str());
-  } else {
-    Serial.println("[setup] closed without changes");
+  uint32_t deadline = millis() + kSetupPortalSeconds * 1000UL;
+  while (static_cast<int32_t>(millis() - deadline) < 0) {
+    // A phone working on it keeps setup open.
+    if (gPhoneConnected) deadline = millis() + kSetupPortalSeconds * 1000UL;
+
+    SetupRequest request;
+    {
+      std::lock_guard<std::mutex> guard(gSetupLock);
+      request = gRequest;
+      gRequest = SetupRequest();
+    }
+    if (request.scan) {
+      setStatus("scanning");
+      scanNetworksForSetup();
+      setStatus("ready");
+    }
+    if (request.apply && tryWifi(request.next)) {
+      saveSettings(request.next);
+      setStatus("saved", request.next.name);
+      Serial.printf("[setup] saved from the app, node name %s\n",
+                    request.next.name.c_str());
+      restartSoon();
+    }
+
+    wm.process();
+    if (pageSaved) {
+      Settings next = gSettings;
+      String key = keyField.getValue();
+      key.trim();
+      if (!key.isEmpty()) next.key = key;
+      next.name = normalizeName(nameField.getValue());
+      next.hub = hubField.getValue();
+      next.hub.trim();
+      // The page saved its own Wi-Fi: forget a hotspot set from the app.
+      next.ssid = "";
+      next.pass = "";
+      saveSettings(next);
+      Serial.printf("[setup] saved from the page, node name %s\n",
+                    next.name.c_str());
+      restartSoon();
+    }
+    delay(10);
   }
-  delay(500);
-  ESP.restart();
-  for (;;) {
-  }
+  Serial.println("[setup] closed without changes");
+  restartSoon();
 }
 
 bool bootHeld(uint32_t forMs) {
@@ -305,7 +585,6 @@ bool bootHeld(uint32_t forMs) {
 // ── Hall link ────────────────────────────────────────────────────────────
 
 WebSocketsClient gSocket;
-String gNodeId;
 bool gWelcomed = false;
 uint32_t gLastSend = 0;
 uint32_t gRejectedUntil = 0;
@@ -440,20 +719,24 @@ void setup() {
   gNodeId = "N-" + gSuffix;
 
   loadSettings();
-  Serial.printf("\nExamGuard node %s (%s)\n", gSettings.name.c_str(),
+  Serial.printf("\nPahara node %s (%s)\n", gSettings.name.c_str(),
                 gNodeId.c_str());
 
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFiManager probe;
+  const bool appWifi = !gSettings.ssid.isEmpty();
   const bool savedWifi = probe.getWiFiIsSaved();
-  if (gSettings.key.isEmpty() || (!savedWifi && strlen(WIFI_SSID) == 0)) {
+  if (gSettings.key.isEmpty() ||
+      (!appWifi && !savedWifi && strlen(WIFI_SSID) == 0)) {
     Serial.println("[setup] no settings yet");
-    runSetupPortal();
+    runSetup();
   }
-  if (bootHeld(kSetupHoldMs)) runSetupPortal();
+  if (bootHeld(kSetupHoldMs)) runSetup();
 
-  if (savedWifi) {
+  if (appWifi) {
+    WiFi.begin(gSettings.ssid.c_str(), gSettings.pass.c_str());
+  } else if (savedWifi) {
     WiFi.begin();  // credentials saved by the setup page
   } else {
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -472,7 +755,7 @@ void loop() {
   // BOOT held 3 s at any time → setup page.
   if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
     if (bootPressedAt == 0) bootPressedAt = now;
-    if (now - bootPressedAt >= kSetupHoldMs) runSetupPortal();
+    if (now - bootPressedAt >= kSetupHoldMs) runSetup();
   } else {
     bootPressedAt = 0;
   }

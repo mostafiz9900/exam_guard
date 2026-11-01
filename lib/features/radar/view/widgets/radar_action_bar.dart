@@ -107,12 +107,14 @@ class _Label extends StatelessWidget {
 
   final String text;
 
+  /// One line; shrinks a little rather than wrapping on narrow phones.
   @override
-  Widget build(BuildContext context) => Text(
-    text,
-    maxLines: 2,
-    textAlign: TextAlign.center,
-    overflow: TextOverflow.ellipsis,
-    style: const TextStyle(fontWeight: FontWeight.w700, height: 1.15),
+  Widget build(BuildContext context) => FittedBox(
+    fit: BoxFit.scaleDown,
+    child: Text(
+      text,
+      maxLines: 1,
+      style: const TextStyle(fontWeight: FontWeight.w700),
+    ),
   );
 }

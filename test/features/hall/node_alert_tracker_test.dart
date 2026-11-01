@@ -97,9 +97,9 @@ void main() {
     );
   });
 
-  test('trusted devices and other ExamGuard nodes never alert', () {
+  test('trusted devices and other Pahara nodes never alert', () {
     trusted = {'T'};
-    final node = _ble('N2', -50, name: 'ExamGuard-Node-02', mfr: 'Espressif');
+    final node = _ble('N2', -50, name: 'Pahara-Node-02', mfr: 'Espressif');
     for (final s in [120, 125]) {
       expect(
         feed(

@@ -10,16 +10,15 @@ import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
-import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:exam_guard/core/widgets/app_settings_menu.dart';
-import 'package:exam_guard/core/widgets/primary_button.dart';
 import 'package:exam_guard/features/action_log/model/action_entry_args.dart';
 import 'package:exam_guard/features/radar/model/finder_scan_issue.dart';
 import 'package:exam_guard/features/radar/model/proximity_meter.dart';
 import 'package:exam_guard/features/radar/view/widgets/closeness_gauge.dart';
+import 'package:exam_guard/features/radar/view/widgets/direction_finder_sheet.dart';
 import 'package:exam_guard/features/radar/view/widgets/distance_band_card.dart';
 import 'package:exam_guard/features/radar/view/widgets/finder_issue_banner.dart';
 import 'package:exam_guard/features/radar/view/widgets/radar_action_bar.dart';
+import 'package:exam_guard/features/radar/view/widgets/radar_device_picker.dart';
 import 'package:exam_guard/features/radar/view/widgets/radar_hero_card.dart';
 import 'package:exam_guard/features/radar/view/widgets/radar_how_to_find.dart';
 import 'package:exam_guard/features/radar/view/widgets/radar_target_header.dart';
@@ -109,10 +108,25 @@ class TrackingRadarScreen extends HookConsumerWidget {
         ..showSnackBar(SnackBar(content: Text('radar_id_copied'.tr())));
     }
 
+    Future<void> changeDevice() async {
+      final picked = await showRadarDevicePicker(
+        context,
+        currentId: activeDevice?.id,
+      );
+      if (picked != null) await radarNotifier.setTargetDevice(picked);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('tracking_radar'.tr()),
         actions: [
+          if (activeDevice != null)
+            IconButton(
+              key: const Key('radar_change_device'),
+              icon: const Icon(Icons.swap_horiz_rounded),
+              tooltip: 'radar_change_device'.tr(),
+              onPressed: changeDevice,
+            ),
           IconButton(
             key: const Key('radar_toggle_vibration'),
             isSelected: radarState.isVibrationEnabled,
@@ -129,7 +143,6 @@ class TrackingRadarScreen extends HookConsumerWidget {
             tooltip: 'radar_audio_tooltip'.tr(),
             onPressed: radarNotifier.toggleAudioAlert,
           ),
-          const AppSettingsMenu(),
         ],
       ),
       bottomNavigationBar: activeDevice == null
@@ -141,7 +154,9 @@ class TrackingRadarScreen extends HookConsumerWidget {
               onLogIncident: () => logIncident(activeDevice),
             ),
       body: activeDevice == null
-          ? const _NoTarget()
+          ? SafeArea(
+              child: RadarDevicePicker(onPick: radarNotifier.setTargetDevice),
+            )
           : LayoutBuilder(
               builder: (context, constraints) => _buildBody(
                 context,
@@ -154,6 +169,9 @@ class TrackingRadarScreen extends HookConsumerWidget {
                 onResetPeak: radarNotifier.resetPeak,
                 onOpenLocation: radarNotifier.openLocationSettings,
                 onRetry: radarNotifier.retry,
+                onFindDirection: activeDevice.isBle
+                    ? () => showDirectionFinder(context, activeDevice)
+                    : null,
               ),
             ),
     );
@@ -170,6 +188,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
     required VoidCallback onResetPeak,
     required VoidCallback onOpenLocation,
     required VoidCallback onRetry,
+    VoidCallback? onFindDirection,
   }) {
     final gap = SizedBox(height: AppDimens.spacingSmall);
     final pad = AppDimens.spacingMedium;
@@ -231,12 +250,32 @@ class TrackingRadarScreen extends HookConsumerWidget {
       level: mode == GaugeMode.live ? s.threatLevel : null,
     );
     const guide = RadarHowToFind();
+    // Body-shadow direction finding needs the signal to be heard.
+    final direction = onFindDirection == null || mode != GaugeMode.live
+        ? null
+        : OutlinedButton.icon(
+            key: const Key('radar_find_direction'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: Size.fromHeight(AppDimens.buttonHeight),
+            ),
+            onPressed: onFindDirection,
+            icon: const Icon(Icons.explore_rounded),
+            label: Text('dir_open'.tr()),
+          );
 
     final Widget content = isWide
         ? Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: hero),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    hero,
+                    if (direction != null) ...[gap, direction],
+                  ],
+                ),
+              ),
               SizedBox(width: pad),
               Expanded(
                 child: Column(
@@ -260,6 +299,7 @@ class TrackingRadarScreen extends HookConsumerWidget {
               if (banner != null) ...[gap, banner],
               gap,
               hero,
+              if (direction != null) ...[gap, direction],
               gap,
               band,
               gap,
@@ -298,57 +338,4 @@ void _useSecondTicker(bool enabled) {
     );
     return timer.cancel;
   }, [enabled]);
-}
-
-class _NoTarget extends StatelessWidget {
-  const _NoTarget();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    return SafeArea(
-      child: Center(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.all(AppDimens.spacingLarge),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: EdgeInsets.all(20.r),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: colors.primary.withValues(alpha: 0.1),
-                ),
-                child: Icon(
-                  Icons.radar_outlined,
-                  size: 56.r,
-                  color: colors.primary,
-                ),
-              ),
-              SizedBox(height: AppDimens.spacingMedium),
-              Text(
-                'radar_no_target_title'.tr(),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              SizedBox(height: 8.r),
-              Text(
-                'radar_no_target_text'.tr(),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium,
-              ),
-              SizedBox(height: AppDimens.spacingLarge),
-              PrimaryButton(
-                label: 'open_scanner'.tr(),
-                onPressed: () => context.pushTo(AppRoute.scanner),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -67,7 +67,7 @@ final _hosting = HallState(
     HallMember(id: 'P-2', name: 'Farzana', kind: HallMemberKind.phone),
     HallMember(
       id: 'N-1',
-      name: 'ExamGuard-Node-Back-Row',
+      name: 'Pahara-Node-Back-Row',
       kind: HallMemberKind.node,
     ),
   ],
@@ -75,7 +75,7 @@ final _hosting = HallState(
     RemoteDevice(
       device: _d('AA:01', 'soundcore R50i', 'Smart Earpiece / Audio', -52),
       sourceId: 'N-1',
-      sourceName: 'ExamGuard-Node-Back-Row',
+      sourceName: 'Pahara-Node-Back-Row',
       receivedAt: _now,
     ),
     RemoteDevice(
@@ -89,7 +89,7 @@ final _hosting = HallState(
     OfflineNode(
       member: const HallMember(
         id: 'N-2',
-        name: 'ExamGuard-Node-Front',
+        name: 'Pahara-Node-Front',
         kind: HallMemberKind.node,
       ),
       since: _now,
@@ -106,7 +106,7 @@ final _hosting = HallState(
         detectedAt: _now,
       ),
       sourceId: 'N-1',
-      sourceName: 'ExamGuard-Node-Back-Row',
+      sourceName: 'Pahara-Node-Back-Row',
     ),
   ],
 );
@@ -231,7 +231,7 @@ void main() {
     expect(find.text('LIVE — hosting room 302-B'), findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -600));
     await tester.pump();
-    expect(find.textContaining('ExamGuard-Node-Back-Row'), findsWidgets);
+    expect(find.textContaining('Pahara-Node-Back-Row'), findsWidgets);
   });
 
   testWidgets('idle offers host and join, never claims to be live', (
@@ -250,7 +250,7 @@ void main() {
       await _pump(tester, _hosting, tile());
       expect(find.text('1 alert(s) from other invigilators'), findsOneWidget);
       expect(
-        find.textContaining('ExamGuard-Node-Back-Row detected'),
+        find.textContaining('Pahara-Node-Back-Row detected'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);

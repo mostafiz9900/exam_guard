@@ -24,7 +24,7 @@ enum HallLinkStatus {
 enum HallMemberKind {
   phone,
 
-  /// Fixed ExamGuard ESP32 sensor node.
+  /// Fixed Pahara ESP32 sensor node.
   node;
 
   static HallMemberKind parse(Object? value) =>
@@ -140,7 +140,10 @@ class HallInvite {
     required this.room,
   });
 
-  static const String scheme = 'examguard';
+  static const String scheme = 'pahara';
+
+  /// Codes made before the rename still join.
+  static const String _legacyScheme = 'examguard';
 
   final String host;
   final int port;
@@ -149,17 +152,19 @@ class HallInvite {
 
   Uri get socketUri => Uri(scheme: 'ws', host: host, port: port);
 
-  /// `examguard://join?h=192.168.43.1&p=47800&t=TOKEN&r=ROOM`
+  /// `pahara://join?h=192.168.43.1&p=47800&t=TOKEN&r=ROOM`
   String encode() => Uri(
     scheme: scheme,
     host: 'join',
     queryParameters: {'h': host, 'p': '$port', 't': token, 'r': room},
   ).toString();
 
-  /// Null for anything that isn't an ExamGuard hall invite.
+  /// Null for anything that isn't an Pahara hall invite.
   static HallInvite? parse(String text) {
     final uri = Uri.tryParse(text.trim());
-    if (uri == null || uri.scheme != scheme || uri.host != 'join') {
+    if (uri == null ||
+        (uri.scheme != scheme && uri.scheme != _legacyScheme) ||
+        uri.host != 'join') {
       return null;
     }
     final q = uri.queryParameters;

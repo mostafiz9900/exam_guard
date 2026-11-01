@@ -4,7 +4,7 @@ import 'package:exam_guard/core/widgets/app_text_context_menu.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 
-/// Reusable text field component for ExamGuard presentation layer.
+/// Reusable text field component for Pahara presentation layer.
 ///
 /// This widget supports prefix/suffix icons, error display, and consistent dark style.
 class CustomTextField extends StatelessWidget {

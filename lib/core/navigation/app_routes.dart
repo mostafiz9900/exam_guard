@@ -3,6 +3,13 @@ class AppRoute {
   AppRoute._();
 
   static const String sessionSetup = '/';
+
+  /// Brand intro shown at every launch; goes on to [onboarding] or
+  /// [sessionSetup].
+  static const String splash = '/splash';
+
+  /// First-run introduction. `?replay=1` when opened from the menu.
+  static const String onboarding = '/welcome';
   static const String dashboard = '/dashboard';
   static const String scanner = '/scanner';
   static const String radar = '/radar';
@@ -32,6 +39,16 @@ class AppRoute {
   /// Hidden camera lens finder (camera + torch glint detection).
   static const String lensFinder = '/lens-finder';
 
+  /// ESP32 sensor nodes: status, guide, and adding one. Usable before an
+  /// exam too, so nodes can be set up in advance.
+  static const String nodes = '/nodes';
+
+  /// "Add a sensor node" wizard (Bluetooth setup).
+  static const String nodeAdd = '/nodes/add';
+
+  /// Seat map with sensor nodes and the devices they locate.
+  static const String hallMap = '/hall-map';
+
   /// Routes that only make sense while an exam is running.
   static const Set<String> requireActiveSession = {
     dashboard,
@@ -45,5 +62,6 @@ class AppRoute {
     hall,
     hallScan,
     lensFinder,
+    hallMap,
   };
 }

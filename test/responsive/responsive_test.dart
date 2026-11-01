@@ -11,7 +11,7 @@ import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:exam_guard/app/app_router.dart';
-import 'package:exam_guard/app/exam_guard_app.dart';
+import 'package:exam_guard/app/pahara_app.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
 import 'package:exam_guard/core/services/permission/i_permission_service.dart';
@@ -121,7 +121,7 @@ class FakeBluetooth implements IBluetoothService {
       for (final (id, name, rssi) in [
         ('B4:12:7A:9C:00:11', 'Samsung Galaxy Buds2 Pro Wireless Earbuds', -58),
         ('F0:99:B6:21:7C:44', 'iPhone', -66),
-        ('24:DC:C3:A1:B2:C3', 'ExamGuard-RF-Node', -49),
+        ('24:DC:C3:A1:B2:C3', 'Pahara-RF-Node', -49),
         ('7C:2E:0D:11:22:33', '', -81),
         ('11:22:33:44:55:66', 'Mi Smart Band 8 Active', -92),
       ]) {
@@ -326,7 +326,7 @@ void main() {
                       FakeMagnetometer(),
                     ),
                   ],
-                  child: const ExamGuardApp(),
+                  child: const PaharaApp(),
                 ),
               ),
             ),
@@ -345,7 +345,7 @@ void main() {
           expect(find.byType(MaterialApp), findsOneWidget);
 
           final router = ProviderScope.containerOf(
-            tester.element(find.byType(ExamGuardApp)),
+            tester.element(find.byType(PaharaApp)),
           ).read(appRouterProvider);
           router.go(screen.route, extra: screen.extra);
           for (var i = 0; i < 6; i++) {

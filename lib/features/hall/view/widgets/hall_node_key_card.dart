@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:exam_guard/core/localization/app_localization.dart';
+import 'package:exam_guard/core/navigation/app_navigator.dart';
+import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 
-/// Host only: the key ExamGuard ESP32 nodes use to join this phone's hall.
+/// Host only: the key Pahara ESP32 nodes use to join this phone's hall.
 class HallNodeKeyCard extends StatelessWidget {
   const HallNodeKeyCard({
     super.key,
@@ -50,41 +52,80 @@ class HallNodeKeyCard extends StatelessWidget {
               ),
             ),
             SizedBox(height: 4.h),
-            for (final (i, step) in const [
-              'hall_node_step1',
-              'hall_node_step2',
-              'hall_node_step3',
-              'hall_node_step4',
-            ].indexed)
-              Padding(
-                padding: EdgeInsets.only(top: 6.h),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CircleAvatar(
-                      radius: 10.r,
-                      backgroundColor: colors.tertiaryContainer,
-                      child: Text(
-                        '${i + 1}',
-                        style: textTheme.labelSmall?.copyWith(
-                          color: colors.onTertiaryContainer,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: AppDimens.spacingSmall),
-                    Expanded(
-                      child: Text(
-                        step.tr(args: {'key': nodeKey}),
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+            Text(
+              'hall_node_easy'.tr(),
+              style: textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                height: 1.35,
               ),
+            ),
+            SizedBox(height: AppDimens.spacingSmall),
+            Wrap(
+              spacing: AppDimens.spacingSmall,
+              runSpacing: 4.h,
+              children: [
+                FilledButton.icon(
+                  key: const Key('hall_node_add'),
+                  onPressed: () => context.pushTo(AppRoute.nodeAdd),
+                  icon: const Icon(Icons.bluetooth_rounded),
+                  label: Text('node_add'.tr()),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => context.pushTo(AppRoute.nodes),
+                  icon: const Icon(Icons.menu_book_rounded),
+                  label: Text('hall_node_guide'.tr()),
+                ),
+              ],
+            ),
+            Theme(
+              data: Theme.of(context)
+                  .copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                title: Text(
+                  'hall_node_without_bt'.tr(),
+                  style: textTheme.bodyMedium,
+                ),
+                children: [
+                  for (final (i, step) in const [
+                    'hall_node_step1',
+                    'hall_node_step2',
+                    'hall_node_step3',
+                    'hall_node_step4',
+                  ].indexed)
+                    Padding(
+                      padding: EdgeInsets.only(top: 6.h),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 10.r,
+                            backgroundColor: colors.tertiaryContainer,
+                            child: Text(
+                              '${i + 1}',
+                              style: textTheme.labelSmall?.copyWith(
+                                color: colors.onTertiaryContainer,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: AppDimens.spacingSmall),
+                          Expanded(
+                            child: Text(
+                              step.tr(args: {'key': nodeKey}),
+                              style: textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
             Wrap(
               spacing: AppDimens.spacingSmall,
               children: [

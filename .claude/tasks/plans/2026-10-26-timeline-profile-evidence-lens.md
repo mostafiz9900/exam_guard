@@ -1,11 +1,11 @@
 # Plan — Device timeline, room profile, report evidence, lens finder
 
-> Status: IN PROGRESS · 2026-10-26 · user asked for all four "at a professional level"
+> Status: DONE · 2026-10-27 (needs on-device check) · user asked for all four "at a professional level"
 
 ## 1. Device timeline (scanner)
 - `PresenceTracker` (pure, tested): per device presence intervals, RSSI samples
   every 5 s (30 min window), reappearance count; *toggling* = ≥ 3 reappearances
-  after ≥ 15 s silence within 10 min. Rotated random addresses are merged.
+  after ≥ 30 s silence within 15 min (BLE only). Rotated random addresses are merged.
 - Scanner VM feeds it on sightings/evictions; `ScannerState.togglingIds` for
   badges; `historyOf(id)` for the details sheet (not in state: no churn).
 - UI: "Activity" section in the device details sheet (signal chart with gaps,

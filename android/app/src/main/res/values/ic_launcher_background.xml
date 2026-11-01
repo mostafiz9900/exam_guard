@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pahara navy: adaptive icon background and splash screen. -->
+    <color name="ic_launcher_background">#0B1628</color>
+    <color name="splash_background">#0B1628</color>
+</resources>

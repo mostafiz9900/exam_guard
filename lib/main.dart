@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-import 'package:exam_guard/app/exam_guard_app.dart';
+import 'package:exam_guard/app/pahara_app.dart';
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/services/storage/hive_storage_impl.dart';
 import 'package:exam_guard/core/services/storage/i_local_storage.dart';
@@ -18,7 +18,7 @@ Future<void> main() async {
     AppLocalization(
       child: ProviderScope(
         overrides: [localStorageProvider.overrideWithValue(storage)],
-        child: const ExamGuardApp(),
+        child: const PaharaApp(),
       ),
     ),
   );

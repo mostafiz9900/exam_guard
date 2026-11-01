@@ -9,7 +9,7 @@ import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:exam_guard/app/app_router.dart';
-import 'package:exam_guard/app/exam_guard_app.dart';
+import 'package:exam_guard/app/pahara_app.dart';
 import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/services/audio/haptic_service.dart';
 import 'package:exam_guard/core/services/bluetooth/i_bluetooth_service.dart';
@@ -33,6 +33,8 @@ import 'package:exam_guard/features/rf_detector/view/rf_detector_screen.dart';
 import 'package:exam_guard/features/scanner/view/wireless_scanner_screen.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
 import 'package:exam_guard/features/session/view/session_setup_screen.dart';
+import 'package:exam_guard/features/onboarding/view/onboarding_screen.dart';
+import 'package:exam_guard/features/onboarding/view/splash_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -159,12 +161,17 @@ class _Wifi implements IWifiScanService {
 }
 
 class _Permissions implements IPermissionService {
-  @override
-  Future<AppPermissionStatus> requestBluetoothScan() async =>
-      AppPermissionStatus.granted;
+  AppPermissionStatus status = AppPermissionStatus.granted;
+  int settingsOpened = 0;
 
   @override
-  Future<bool> openSettings() async => true;
+  Future<AppPermissionStatus> requestBluetoothScan() async => status;
+
+  @override
+  Future<bool> openSettings() async {
+    settingsOpened++;
+    return true;
+  }
 
   @override
   Future<bool> openLocationSettings() async => true;
@@ -233,7 +240,8 @@ class _Pdf implements IPdfService {
 }
 
 class _MemoryStorage implements ILocalStorage {
-  final values = <String, Object?>{};
+  // The first-run introduction has its own tests.
+  final values = <String, Object?>{'onboarding_done_v1': true};
 
   @override
   Future<void> write(String key, Object? value) async => values[key] = value;
@@ -274,13 +282,14 @@ class _Harness {
   final haptics = FakeHaptics();
   final share = _Share();
   final pdf = _Pdf();
+  final permissions = _Permissions();
 
   late final overrides = [
     localStorageProvider.overrideWithValue(storage),
     bluetoothServiceProvider.overrideWithValue(bluetooth),
     classicBluetoothServiceProvider.overrideWithValue(classic),
     wifiScanServiceProvider.overrideWithValue(wifi),
-    permissionServiceProvider.overrideWithValue(_Permissions()),
+    permissionServiceProvider.overrideWithValue(permissions),
     magnetometerServiceProvider.overrideWithValue(_Magnetometer()),
     wakelockServiceProvider.overrideWithValue(wakelock),
     hapticServiceProvider.overrideWithValue(haptics),
@@ -338,13 +347,16 @@ Future<void> _launch(WidgetTester tester, _Harness harness) async {
       child: ProviderScope(
         key: UniqueKey(),
         overrides: harness.overrides,
-        child: const ExamGuardApp(),
+        child: const PaharaApp(),
       ),
     ),
   );
   // Translations load from assets and the router parses its first route
   // asynchronously; wait for the first screen.
-  for (var i = 0; i < 100 && find.byType(Scaffold).evaluate().isEmpty; i++) {
+  bool starting() =>
+      find.byType(Scaffold).evaluate().isEmpty ||
+      find.byType(SplashScreen).evaluate().isNotEmpty;
+  for (var i = 0; i < 100 && starting(); i++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 20)),
     );
@@ -361,7 +373,7 @@ Future<void> shutDown(WidgetTester tester) async {
 }
 
 String _location(WidgetTester tester) =>
-    ProviderScope.containerOf(tester.element(find.byType(ExamGuardApp)))
+    ProviderScope.containerOf(tester.element(find.byType(PaharaApp)))
         .read(appRouterProvider)
         .state
         .uri
@@ -449,6 +461,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await EasyLocalization.ensureInitialized();
     await _loadFonts();
+    SplashScreen.hold = Duration.zero;
   });
 
   // CachingAssetBundle keeps the translation futures of the previous test,
@@ -508,7 +521,7 @@ void main() {
     await openModuleAndBack(tester, 'report', ReportSummaryScreen);
 
     // History is closed while the exam runs: redirected to the dashboard.
-    ProviderScope.containerOf(tester.element(find.byType(ExamGuardApp)))
+    ProviderScope.containerOf(tester.element(find.byType(PaharaApp)))
         .read(appRouterProvider)
         .go(AppRoute.history);
     await settle(tester);
@@ -566,7 +579,7 @@ void main() {
     expect(harness.share.files.single, endsWith('.pdf'));
 
     // Exam screens are closed after the exam ended.
-    ProviderScope.containerOf(tester.element(find.byType(ExamGuardApp)))
+    ProviderScope.containerOf(tester.element(find.byType(PaharaApp)))
         .read(appRouterProvider)
         .go(AppRoute.dashboard);
     await settle(tester);
@@ -741,5 +754,92 @@ void main() {
     expect(brightness(), Brightness.dark);
 
     await shutDown(tester);
+  });
+
+  group('first launch', () {
+    _MemoryStorage fresh() =>
+        _MemoryStorage()..values.remove('onboarding_done_v1');
+
+    testWidgets('splash → introduction → permissions → setup, only once', (
+      tester,
+    ) async {
+      _phoneScreen(tester);
+      final storage = fresh();
+      final harness = _Harness(storage);
+      await _launch(tester, harness);
+      expect(find.byType(OnboardingScreen), findsOneWidget);
+      expect(
+        find.text(t('onb_welcome_title', args: {'app': 'Pahara'})),
+        findsOneWidget,
+      );
+
+      // Language is chosen on the first page.
+      await tester.tap(find.byKey(const Key('onb_lang_bn')));
+      await settle(tester);
+      expect(
+        find.text(t('onb_welcome_title', lang: 'bn', args: {'app': 'Pahara'})),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('onb_lang_en')));
+      await settle(tester);
+
+      await tester.tap(find.byKey(const Key('onb_next')));
+      await settle(tester);
+      expect(find.text(t('onb_find_title')), findsOneWidget);
+
+      // Skip goes to the permission page, not past it.
+      await tester.tap(find.byKey(const Key('onb_skip')));
+      await settle(tester);
+      expect(find.text(t('onb_perm_title')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('onb_allow')));
+      await settle(tester);
+      expect(find.text(t('onb_perm_granted')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('onb_next')));
+      await settle(tester);
+      expect(find.byType(SessionSetupScreen), findsOneWidget);
+      expect(storage.values['onboarding_done_v1'], isTrue);
+      await shutDown(tester);
+
+      await _launch(tester, _Harness(storage));
+      expect(find.byType(OnboardingScreen), findsNothing);
+      expect(find.byType(SessionSetupScreen), findsOneWidget);
+      await shutDown(tester);
+    });
+
+    testWidgets('blocked permission offers the settings page', (tester) async {
+      _phoneScreen(tester);
+      final harness = _Harness(fresh());
+      harness.permissions.status = AppPermissionStatus.permanentlyDenied;
+      await _launch(tester, harness);
+      await tester.tap(find.byKey(const Key('onb_skip')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('onb_allow')));
+      await settle(tester);
+      expect(find.text(t('onb_perm_blocked')), findsOneWidget);
+      expect(find.text(t('onb_perm_settings')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('onb_allow')));
+      await settle(tester);
+      expect(harness.permissions.settingsOpened, 1);
+      await shutDown(tester);
+    });
+
+    testWidgets('"How Pahara works" replays it and comes back', (tester) async {
+      _phoneScreen(tester);
+      await _launch(tester, _Harness(_MemoryStorage()));
+      expect(find.byType(SessionSetupScreen), findsOneWidget);
+      await tester.tap(find.byTooltip(t('appearance')).first);
+      await settle(tester);
+      await tester.tap(find.text(t('onb_menu_guide')));
+      await settle(tester);
+      expect(find.byType(OnboardingScreen), findsOneWidget);
+      await tester.tap(find.byKey(const Key('onb_skip')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('onb_next')));
+      await settle(tester);
+      expect(find.byType(OnboardingScreen), findsNothing);
+      expect(find.byType(SessionSetupScreen), findsOneWidget);
+      await shutDown(tester);
+    });
   });
 }

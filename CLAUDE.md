@@ -20,7 +20,7 @@
 - If a path does not start with .claude/ — stop and fix it
 
 ## 🧭 Project Context
-- **Name**: exam_guard
+- **Name**: Pahara – Exam Hall Security (app id `com.it24617.pahara.app`; Dart package still `exam_guard`)
 - **Purpose**: Help exam invigilators detect hidden electronic devices (BLE scan, magnetometer, RF meter) and log violations
 - **Stack**: Flutter 3.47 (fvm) · hooks_riverpod 3.4 (no codegen) · go_router · Hive · flutter_blue_plus · sensors_plus
 - **Current Phase**: [MVP / Growth / Maintenance]

@@ -1,7 +1,7 @@
-// ExamGuard sensor node — optional build-time defaults.
+// Pahara sensor node — optional build-time defaults.
 //
 // You normally DON'T need this file: set the node up from a phone instead
-// (hold BOOT 3 s → join Wi-Fi "ExamGuard-Setup-…" → fill in the page).
+// (hold BOOT 3 s → join Wi-Fi "Pahara-Setup-…" → fill in the page).
 // Settings saved there are kept on the board and win over these defaults.
 //
 // To bake defaults into the firmware, copy this file to node_config.h
@@ -16,8 +16,8 @@
 // App: Hall link → Host this hall → Sensor nodes. Empty = setup page.
 #define NODE_KEY ""
 
-// Empty = automatic, e.g. "ExamGuard-Node-A1B2C3". A custom name always
-// starts with "ExamGuard" (added if missing) so phones trust the node.
+// Empty = automatic, e.g. "Pahara-Node-A1B2C3". A custom name always
+// starts with "Pahara" (added if missing) so phones trust the node.
 #define NODE_NAME ""
 
 // Empty = the Wi-Fi gateway, i.e. the host phone running the hotspot.
@@ -25,8 +25,8 @@
 #define HUB_HOST ""
 #define HUB_PORT 47800
 
-// Password of the "ExamGuard-Setup-…" Wi-Fi (at least 8 characters).
-#define SETUP_PASSWORD "examguard"
+// Password of the "Pahara-Setup-…" Wi-Fi (at least 8 characters).
+#define SETUP_PASSWORD "pahara123"
 
 // Pins of a standard ESP32 DevKit.
 #define LED_PIN 2

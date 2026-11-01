@@ -19,6 +19,8 @@ import 'package:exam_guard/core/utils/app_date_format.dart';
 import 'package:exam_guard/core/navigation/app_navigator.dart';
 import 'package:exam_guard/features/magnetic/model/magnetic_levels.dart';
 import 'package:exam_guard/features/session/view/widgets/room_profile_sheet.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/lens_finder_tile.dart';
+import 'package:exam_guard/features/dashboard/view/widgets/sensor_nodes_tile.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/hall_link_tile.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/live_stat_badge.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/dashboard_module_card.dart';
@@ -484,6 +486,10 @@ class DashboardScreen extends HookConsumerWidget {
                         ],
                         SizedBox(height: AppDimens.spacingSmall),
                         const HallLinkTile(),
+                        SizedBox(height: AppDimens.spacingSmall),
+                        const SensorNodesTile(),
+                        SizedBox(height: AppDimens.spacingSmall),
+                        const LensFinderTile(),
                         SizedBox(height: AppDimens.spacingLarge),
 
                         Text(

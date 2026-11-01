@@ -630,7 +630,7 @@ void main() {
       expect(h.pdf.calls, 1);
       expect(h.share.calls, hasLength(1));
       final call = h.share.calls.single;
-      expect(call.fileName, 'examguard_room_12_B_2026-10-13.pdf');
+      expect(call.fileName, 'pahara_room_12_B_2026-10-13.pdf');
       expect(call.fileName, ReportRepository.reportFileName(session));
       expect(call.fileName, isNot(contains('/')));
       expect(call.mimeType, 'application/pdf');

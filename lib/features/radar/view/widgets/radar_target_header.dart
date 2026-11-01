@@ -113,6 +113,9 @@ class RadarTargetHeader extends StatelessWidget {
                       SizedBox(height: 4.rc),
                       Row(
                         children: [
+                          // Equal shares: the short "BLE" tag keeps its
+                          // natural width (the ID used to take 3/4 and
+                          // squeeze it to "B…"); both still shrink.
                           Flexible(
                             child: _Tag(
                               label: transportKey(device.transport).tr(),
@@ -121,7 +124,6 @@ class RadarTargetHeader extends StatelessWidget {
                           ),
                           SizedBox(width: 8.rc),
                           Expanded(
-                            flex: 3,
                             child: Text(
                               device.address,
                               key: const Key('radar_target_id'),

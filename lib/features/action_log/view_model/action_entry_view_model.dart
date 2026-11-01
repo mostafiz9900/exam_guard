@@ -246,7 +246,7 @@ class ActionEntryViewModel extends Notifier<ActionEntryState> {
           .shareReport(
             text,
             subject:
-                'ExamGuard violation report — Room ${room.isEmpty ? '-' : room}',
+                'Pahara violation report — Room ${room.isEmpty ? '-' : room}',
             origin: origin,
           );
       return outcome == ShareOutcome.unavailable

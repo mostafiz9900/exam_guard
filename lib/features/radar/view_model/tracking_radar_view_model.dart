@@ -227,6 +227,8 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
 
     _targetIds = _aliases.of(device.id);
     await _sub?.cancel();
+    // The screen may close (or the target change) while cancelling.
+    if (!ref.mounted || state.device?.id != device.id) return;
     _sub = _repository
         .watchAll()
         .where((s) => _targetIds.contains(s.deviceId))
@@ -249,6 +251,7 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
       await _repository.startTracking();
     } on BleScanException catch (e) {
       _logger.warning('Radar scan failed to start', e);
+      if (!ref.mounted) return;
       if (e.code != BleScanError.locationOff) {
         _fail(scanErrorKey(e));
         return;
@@ -257,9 +260,10 @@ class TrackingRadarViewModel extends Notifier<TrackingRadarState> {
       _onLocationOff();
     } catch (e, st) {
       _logger.error('Radar could not start scanning', e, st);
-      _fail('radar_err_scan_start');
+      if (ref.mounted) _fail('radar_err_scan_start');
       return;
     }
+    if (!ref.mounted) return;
     _watchScanProblem();
   }
 

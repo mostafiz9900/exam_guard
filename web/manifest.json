@@ -1,11 +1,11 @@
 {
-    "name": "exam_guard",
-    "short_name": "exam_guard",
+    "name": "Pahara – Exam Hall Security",
+    "short_name": "Pahara",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Find hidden wireless devices in exam halls and log incidents.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
