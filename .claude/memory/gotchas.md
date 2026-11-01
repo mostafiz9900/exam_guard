@@ -238,3 +238,4 @@
 - **What Happens**: Writing N/S/E/W on the radar without data would mislead. Picking the strongest 10° bin wobbles ±20° because the top of the shadow curve is flat.
 - **How to Avoid**: Direction comes only from DirectionFinder (a full turn while holding the phone at the chest), using a first-harmonic fit. Show "unclear" rather than guess. CustomPainter text must use a theme TextStyle (font family), or tests render boxes.
 - **Discovered**: 2026-11-01
+- 2026-11-01 again: icon v2 (shield + eye, from an icon generator site) also had a baked checkerboard (dark squares, fully opaque). It was regenerated from `docs/store/assets/icon-source-v2.png` with the circle cut at r = 459 px. Icon generator zips carry no `values/styles.xml`: never delete `res/values` when swapping icons.

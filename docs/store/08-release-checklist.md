@@ -17,9 +17,10 @@
 
 ## Blockers — must do before submitting
 
-- [x] **App icon** (2026-11-01): the radar emblem, cut out of its baked-in checkerboard, on navy `#0B1628`.
-  - Android: legacy, round and adaptive icons. iOS: every size. Store files are in `docs/store/assets/`.
-  - The source was only 512 px, so the 1024 px App Store icon is upscaled. A sharper 1024+ px original (with real transparency) would be better.
+- [x] **App icon v2** (2026-11-01): the shield + eye emblem (source `docs/store/assets/icon-source-v2.png`, 1024 px), cut out of its baked-in dark checkerboard and placed on navy `#0B1628`.
+  - Android: legacy, round and adaptive icons; values restored.
+  - iOS: every size, RGB with no alpha (App Store safe).
+  - Splash and store icons use the same emblem.
 - [x] **Splash + onboarding** (2026-11-01): native splash on Android (12+ too) and iOS, an animated brand intro, and a 5-page first-run introduction.
 - [ ] **Android release signing.** Create an upload keystore and `android/key.properties` (never commit it), and point `buildTypes.release.signingConfig` at it. Today release builds use the debug key, and Play rejects that.
 - [ ] **flutter_blue_plus license.** `lib/core/services/bluetooth/*_impl.dart` uses `License.nonprofit`. If Pahara is sold or used commercially, buy the commercial license from the package author and switch to `License.commercial`.
