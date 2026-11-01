@@ -239,3 +239,8 @@
 - **How to Avoid**: Direction comes only from DirectionFinder (a full turn while holding the phone at the chest), using a first-harmonic fit. Show "unclear" rather than guess. CustomPainter text must use a theme TextStyle (font family), or tests render boxes.
 - **Discovered**: 2026-11-01
 - 2026-11-01 again: icon v2 (shield + eye, from an icon generator site) also had a baked checkerboard (dark squares, fully opaque). It was regenerated from `docs/store/assets/icon-source-v2.png` with the circle cut at r = 459 px. Icon generator zips carry no `values/styles.xml`: never delete `res/values` when swapping icons.
+
+#### Real phone test (Samsung Galaxy A07, Android 16) — 2026-11-01
+- **No compass and no gyroscope** (only an accelerometer). The magnetic scanner correctly shows "No sensor"; the direction finder correctly says "no compass". Budget phones are common among users, so never assume a magnetometer.
+- **Radar picker rows couldn't be tapped**: the list re-sorted on every scan packet, so the row under the finger changed between press and release. It also sorted by raw RSSI while showing a TX-power-adjusted distance (≈2 m listed above <1 m). Fixed: sort by the displayed distance step, at most every 2 s, stable among equals (`pickerOrder`). Any live list that people tap must not reorder this fast.
+- Scanner on the A07 in a real room: BLE 13, classic 3, Wi-Fi 10. Radar live at -35 dBm. Splash, onboarding, permissions and exam resume all work.

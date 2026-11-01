@@ -9,6 +9,7 @@ import 'package:exam_guard/core/navigation/app_routes.dart';
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/widgets/app_text_context_menu.dart';
+import 'package:exam_guard/features/scanner/model/distance_estimate.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view/device_type_labels.dart';
 import 'package:exam_guard/features/scanner/view/distance_text.dart';
@@ -50,14 +51,31 @@ class RadarDevicePicker extends HookConsumerWidget {
     final textTheme = Theme.of(context).textTheme;
 
     final q = query.value.trim().toLowerCase();
-    final groups = [
+    final byId = {
       for (final g in state.groups)
         if (g.primary.isBle &&
             !state.isGroupStale(g) &&
             (!onlyUntrusted.value || !state.isGroupTrusted(g)) &&
             (q.isEmpty || _matches(g, q)))
-          g,
-    ]..sort((a, b) => b.strongestRssi.compareTo(a.strongestRssi));
+          g.primary.id: g,
+    };
+    // Rows must hold still under a finger: re-sort at most every 2 s, by
+    // the distance shown (not raw RSSI: TX power changes it), keeping the
+    // current order among equal distances.
+    final order = useRef<List<String>>(const []);
+    final sortedAt = useRef(DateTime.fromMillisecondsSinceEpoch(0));
+    final now = DateTime.now();
+    final resort = now.difference(sortedAt.value) >= resortEvery;
+    if (resort) sortedAt.value = now;
+    order.value = pickerOrder(
+      previous: order.value,
+      bucketOf: {
+        for (final e in byId.entries)
+          e.key: distanceBucket(e.value.strongestRssi, e.value.primary.txPower),
+      },
+      resort: resort,
+    );
+    final groups = [for (final id in order.value) byId[id]!];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -386,4 +404,40 @@ class _Empty extends StatelessWidget {
       ],
     );
   }
+}
+
+/// How often the picker may reorder its rows.
+const Duration resortEvery = Duration(seconds: 2);
+
+/// The distance step shown in the list: 0 for "<1 m", 1–9 for "≈N m",
+/// 10 for ">10 m". Sorting by this (not raw RSSI) keeps the list in the
+/// order the user reads, and small RSSI jitter doesn't reorder rows.
+int distanceBucket(int rssi, int? txPower) {
+  final m = DistanceEstimate.forDevice(rssi, txPower);
+  if (m < 1) return 0;
+  if (m >= 10) return 10;
+  return m.round();
+}
+
+/// Row order for the picker. Rows that are gone drop out, new rows join at
+/// the end; with [resort] the rows are ordered closest first, keeping
+/// their previous order among equal distances (a stable sort).
+@visibleForTesting
+List<String> pickerOrder({
+  required List<String> previous,
+  required Map<String, int> bucketOf,
+  required bool resort,
+}) {
+  final ids = [
+    for (final id in previous)
+      if (bucketOf.containsKey(id)) id,
+    for (final id in bucketOf.keys)
+      if (!previous.contains(id)) id,
+  ];
+  if (!resort) return ids;
+  final rank = {for (final (i, id) in ids.indexed) id: i};
+  return ids..sort((a, b) {
+    final c = bucketOf[a]!.compareTo(bucketOf[b]!);
+    return c != 0 ? c : rank[a]!.compareTo(rank[b]!);
+  });
 }
