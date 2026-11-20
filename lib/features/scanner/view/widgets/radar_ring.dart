@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// One expanding ring of the status card's radar animation.
 class RadarRing extends StatelessWidget {

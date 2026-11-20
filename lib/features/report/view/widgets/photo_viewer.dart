@@ -1,6 +1,6 @@
 import 'dart:io' show File;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 
 import 'package:exam_guard/core/localization/app_localization.dart';

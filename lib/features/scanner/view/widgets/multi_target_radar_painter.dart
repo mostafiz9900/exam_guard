@@ -3,7 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view/widgets/professional_device_card.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Where a device's dot sits around the circle. BLE gives no direction, so
 /// the angle only spreads dots apart; it is derived from the device id so

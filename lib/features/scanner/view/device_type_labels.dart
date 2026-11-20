@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
@@ -15,6 +15,7 @@ String deviceTypeLabel(String type) {
   if (type == 'Wi-Fi Access Point') return 'scan_type_wifi_ap'.tr();
   if (type == 'Computer / Laptop') return 'scan_type_computer'.tr();
   if (type == 'Bluetooth Device') return 'scan_type_classic_other'.tr();
+  if (type == 'Audio Device') return 'scan_type_audio_device'.tr();
   if (type.contains('ESP32')) return 'scan_type_esp32'.tr();
   if (type.contains('Audio')) return 'scan_type_earpiece'.tr();
   if (type.contains('Hotspot') || type.contains('AP')) {
@@ -35,6 +36,7 @@ String deviceTypeShortLabel(String type) {
   if (type == 'Wi-Fi Access Point') return 'scan_short_wifi_ap'.tr();
   if (type == 'Computer / Laptop') return 'scan_short_computer'.tr();
   if (type == 'Bluetooth Device') return 'scan_short_classic_other'.tr();
+  if (type == 'Audio Device') return 'scan_short_audio_device'.tr();
   if (type.contains('ESP32')) return 'scan_short_esp32'.tr();
   if (type.contains('Audio')) return 'scan_short_earpiece'.tr();
   if (type.contains('Hotspot') || type.contains('AP')) {

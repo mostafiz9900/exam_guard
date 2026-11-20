@@ -35,9 +35,6 @@ class RssiSmoother {
 
   void remove(String id) => _values.remove(id);
 
-  void retainOnly(Set<String> ids) =>
-      _values.removeWhere((id, _) => !ids.contains(id));
-
   void clear() => _values.clear();
 }
 

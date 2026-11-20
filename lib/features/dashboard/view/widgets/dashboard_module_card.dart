@@ -1,6 +1,6 @@
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class DashboardModuleCard extends StatelessWidget {
   const DashboardModuleCard({

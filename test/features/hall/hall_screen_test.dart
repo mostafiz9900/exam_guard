@@ -13,7 +13,7 @@ import 'package:exam_guard/features/hall/view/hall_screen.dart';
 import 'package:exam_guard/features/hall/view_model/hall_view_model.dart';
 import 'package:exam_guard/features/scanner/model/new_device_alert.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

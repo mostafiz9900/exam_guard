@@ -9,7 +9,7 @@ import 'package:exam_guard/features/history/view/history_screen.dart';
 import 'package:exam_guard/features/history/view/widgets/history_entry_card.dart';
 import 'package:exam_guard/features/session/model/action_log_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';

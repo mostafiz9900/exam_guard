@@ -4,7 +4,7 @@ import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/dashboard/view/widgets/signal_strength.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class LiveThreatTile extends StatelessWidget {
   const LiveThreatTile({

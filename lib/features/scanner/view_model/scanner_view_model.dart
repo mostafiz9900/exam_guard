@@ -1345,6 +1345,9 @@ class ScannerViewModel extends Notifier<ScannerState> {
       _recordRotation(rotatedFrom.id, seen.id);
       _presence.alias(rotatedFrom.id, seen.id);
       _inheritFromRotated(rotatedFrom.id, seen.id);
+      // Carry the smoothed signal over so the card's distance/label doesn't
+      // jump when the address rotates (must run before _forget clears it).
+      _smoother.inherit(rotatedFrom.id, seen.id);
       // The new address takes the old card's place in the list.
       final place = _appearance[rotatedFrom.id];
       _forget(rotatedFrom.id);

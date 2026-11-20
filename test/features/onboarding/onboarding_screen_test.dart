@@ -11,7 +11,7 @@ import 'package:exam_guard/core/theme/app_theme.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/onboarding/view/onboarding_screen.dart';
 import 'package:exam_guard/features/onboarding/view/splash_screen.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

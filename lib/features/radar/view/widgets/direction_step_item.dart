@@ -1,5 +1,5 @@
 import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class DirectionStepItem extends StatelessWidget {
   const DirectionStepItem({

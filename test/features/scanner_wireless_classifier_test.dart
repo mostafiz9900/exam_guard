@@ -20,7 +20,10 @@ void main() {
         );
 
     test('major classes map to scanner categories', () {
-      expect(type(major: 0x0400, cls: 0x0414), C.audioType);
+      // A worn earpiece/headset class is an earpiece; other audio/video gear
+      // (a loudspeaker here) is a general audio device, not an earpiece.
+      expect(type(major: 0x0400, cls: 0x0404), C.audioType);
+      expect(type(major: 0x0400, cls: 0x0414), C.audioDeviceType);
       expect(type(major: 0x0200, cls: 0x020C), C.phoneType);
       expect(type(major: 0x0700, cls: 0x0704), C.wearableType);
       expect(type(major: 0x0100, cls: 0x010C), C.computerType);

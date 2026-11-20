@@ -6,8 +6,8 @@ plugins {
 
 android {
     namespace = "com.it24617.pahara.app"
-    // permission_handler 13 compiles against Android 17 (API 37).
-    compileSdk = maxOf(flutter.compileSdkVersion, 37)
+    // Flutter 3.47 defaults to API 36, which covers the Android plugin requirements.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

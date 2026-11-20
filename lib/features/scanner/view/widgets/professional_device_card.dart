@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 
 import 'package:exam_guard/features/scanner/view/distance_text.dart';
@@ -36,6 +36,7 @@ IconData _categoryIcon(String type) {
   if (type.contains('Hotspot') || type.contains('AP')) {
     return Icons.wifi_tethering_rounded;
   }
+  if (type == 'Audio Device') return Icons.speaker_rounded;
   if (type.contains('Audio')) return Icons.headset_mic_rounded;
   if (type.contains('Wearable')) return Icons.watch_rounded;
   if (type.contains('Smartphone')) return Icons.smartphone_rounded;

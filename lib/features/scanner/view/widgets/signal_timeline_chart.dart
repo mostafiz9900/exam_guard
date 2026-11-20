@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:exam_guard/core/utils/app_date_format.dart';
 import 'package:exam_guard/features/scanner/model/presence_tracker.dart';

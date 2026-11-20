@@ -32,6 +32,9 @@ dependencies:
     sdk: flutter
 
   # UI, state management, navigation, and platform utilities.
+  # Flutter 3.50 moved the Material library out of the flutter SDK into the
+  # standalone first-party material_ui package.
+  material_ui: ^1.11.1
   cupertino_icons: ^2.0.0
   hooks_riverpod: ^3.4.3
   flutter_hooks: ^0.21.3+1

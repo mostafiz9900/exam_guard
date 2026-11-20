@@ -84,7 +84,8 @@ class ScannedDeviceModel {
     }
     if (manufacturer.contains('Samsung')) return 'Samsung Device ($suffix)';
     if (manufacturer.contains('Espressif')) return 'ESP32 Module ($suffix)';
-    if (deviceType.contains('Audio')) return 'Wireless Earpiece ($suffix)';
+    if (deviceType.contains('Earpiece')) return 'Wireless Earpiece ($suffix)';
+    if (deviceType.contains('Audio')) return 'Audio Device ($suffix)';
     if (deviceType.contains('Wearable')) return 'Smartband / Watch ($suffix)';
     if (manufacturer != 'Generic BLE Hardware' &&
         manufacturer != genericBluetoothManufacturer) {

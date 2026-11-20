@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/features/lens_finder/view_model/lens_finder_view_model.dart';

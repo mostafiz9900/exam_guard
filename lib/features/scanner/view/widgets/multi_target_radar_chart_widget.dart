@@ -5,7 +5,7 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view/widgets/multi_target_radar_painter.dart';
 import 'package:exam_guard/features/scanner/view/widgets/professional_device_card.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// All shown devices on one chart. Rings are estimated distance from the
 /// signal strength; the position around the circle is NOT a direction.

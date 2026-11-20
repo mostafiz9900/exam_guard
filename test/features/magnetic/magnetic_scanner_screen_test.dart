@@ -21,7 +21,7 @@ import 'package:exam_guard/features/magnetic/view/magnetic_scanner_screen.dart';
 import 'package:exam_guard/features/magnetic/view/widgets/guide_step_item.dart';
 import 'package:exam_guard/features/magnetic/view/widgets/magnetic_dial.dart';
 import 'package:exam_guard/features/magnetic/view_model/magnetic_view_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

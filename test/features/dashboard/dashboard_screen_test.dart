@@ -27,7 +27,7 @@ import 'package:exam_guard/features/magnetic/view_model/magnetic_view_model.dart
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
 import 'package:exam_guard/features/session/model/session_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';

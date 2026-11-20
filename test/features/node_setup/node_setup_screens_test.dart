@@ -18,7 +18,7 @@ import 'package:exam_guard/features/hall/view_model/hall_view_model.dart';
 import 'package:exam_guard/features/node_setup/view/node_setup_screen.dart';
 import 'package:exam_guard/features/node_setup/view/sensor_nodes_screen.dart';
 import 'package:exam_guard/features/session/view_model/session_view_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

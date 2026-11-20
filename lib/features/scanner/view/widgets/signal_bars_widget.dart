@@ -1,5 +1,5 @@
 import 'package:exam_guard/core/utils/size_extensions.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class SignalBarsWidget extends StatelessWidget {
   const SignalBarsWidget({super.key, required this.bars, required this.color});

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:exam_guard/core/localization/app_localization.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';

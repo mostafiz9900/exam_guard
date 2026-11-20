@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Illustration behind the setup header: an exam hall seen from the
 /// invigilator's desk — rows of desks in perspective — with a radar sweep

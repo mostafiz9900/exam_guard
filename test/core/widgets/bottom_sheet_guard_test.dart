@@ -9,7 +9,7 @@ import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/features/scanner/model/presence_tracker.dart';
 import 'package:exam_guard/features/scanner/model/scanned_device_model.dart';
 import 'package:exam_guard/features/scanner/view/widgets/device_details_sheet.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';

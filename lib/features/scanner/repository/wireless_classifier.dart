@@ -9,6 +9,11 @@ class WirelessClassifier {
   WirelessClassifier._();
 
   static const String audioType = 'Smart Earpiece / Audio';
+
+  /// Audio/video gear that is not a worn earpiece: speakers, car audio, a TV
+  /// or projector's Bluetooth. Still "Audio" (so it is listed and filtered
+  /// with audio), but not called an earpiece.
+  static const String audioDeviceType = 'Audio Device';
   static const String phoneType = 'Smartphone / Mobile';
   static const String wearableType = 'Smartwatch / Wearable';
   static const String computerType = 'Computer / Laptop';
@@ -58,7 +63,9 @@ class WirelessClassifier {
   }) {
     switch (_major(majorDeviceClass, deviceClass)) {
       case majorAudioVideo:
-        return audioType;
+        // Only a worn earpiece/headset/headphone class is an "earpiece";
+        // speakers, car audio, TVs and projectors are general audio gear.
+        return isSpyEarpieceClass(deviceClass) ? audioType : audioDeviceType;
       case majorPhone:
         return phoneType;
       case majorWearable:

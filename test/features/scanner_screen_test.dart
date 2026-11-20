@@ -19,7 +19,7 @@ import 'package:exam_guard/features/scanner/view/widgets/scanner_empty_state.dar
 import 'package:exam_guard/features/scanner/view/widgets/walk_selection_bar.dart';
 import 'package:exam_guard/features/scanner/view/wireless_scanner_screen.dart';
 import 'package:exam_guard/features/scanner/view_model/scanner_view_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';

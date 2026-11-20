@@ -1,7 +1,7 @@
 import 'package:exam_guard/core/theme/app_dimens.dart';
 import 'package:exam_guard/core/utils/size_extensions.dart';
 import 'package:exam_guard/core/widgets/app_shimmer.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Placeholder card shown while waiting for the first advertisement.
 class DeviceShimmerCard extends StatelessWidget {

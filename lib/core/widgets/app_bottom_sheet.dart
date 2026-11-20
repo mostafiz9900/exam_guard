@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Every bottom sheet in the app. Tall sheets must never trap the user:
 /// the sheet stays inside the safe area, stops at [maxHeightFraction] of
